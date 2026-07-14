@@ -125,11 +125,109 @@ export default class UrlService {
     return url;
   }
 
-  listForUser(userId) {
-    return this.#urls.findByUser(userId);
+  /**
+   * One page of a user's links, plus a cursor for the next.
+   *
+   * The cursor is an opaque base64 string on purpose. It encodes (created_at, id)
+   * — but a client that decodes it, and starts constructing its own, has coupled
+   * itself to our pagination scheme, and we can never change it. Opaque means we
+   * can switch keys, or move to a different strategy entirely, without breaking
+   * anyone.
+   */
+  async listForUser(userId, { limit = 20, cursor = null } = {}) {
+    const size = Math.min(100, Math.max(1, Number(limit) || 20));
+
+    // Fetch one extra row. Its existence is how we know there's a next page —
+    // without it we'd have to run a second COUNT query, which on a large table is
+    // more expensive than the page itself.
+    const rows = await this.#urls.findByUser(userId, {
+      limit: size + 1,
+      cursor: decodeCursor(cursor),
+    });
+
+    const hasMore = rows.length > size;
+    const page = hasMore ? rows.slice(0, size) : rows;
+    const last = page.at(-1);
+
+    return {
+      links: page,
+      nextCursor: hasMore && last ? encodeCursor(last) : null,
+    };
+  }
+
+  /**
+   * Deletes a link the user owns.
+   *
+   * Ownership is enforced in the DELETE's WHERE clause, so a link belonging to
+   * someone else simply doesn't match — and this reports it as "not found",
+   * never as "forbidden". A 403 would confirm the link exists and belongs to
+   * *somebody*, which is a small oracle worth not handing out.
+   */
+  async remove({ urlCode, userId }) {
+    const deleted = await this.#urls.deleteForUser(urlCode, userId);
+
+    if (!deleted) {
+      throw new NotFoundError("That link doesn't exist, or isn't yours.");
+    }
+
+    logger.info("Link deleted", { urlCode });
+    return deleted;
+  }
+
+  /**
+   * Repoints a link at a new destination. The short code doesn't change — that is
+   * the point: everyone who already has the link keeps working.
+   *
+   * The new URL goes through the same validation chain as a new one. Skipping it
+   * here would be a hole straight through every rule the chain enforces: shorten
+   * something harmless, then edit it to `javascript:alert(1)`.
+   */
+  async repoint({ urlCode, userId, longUrl }) {
+    const normalised = this.#validator.validate(longUrl);
+
+    const updated = await this.#urls.updateLongUrlForUser(
+      urlCode,
+      userId,
+      normalised,
+    );
+
+    if (!updated) {
+      throw new NotFoundError("That link doesn't exist, or isn't yours.");
+    }
+
+    logger.info("Link repointed", { urlCode });
+    return updated;
   }
 
   statsForUser(userId) {
     return this.#urls.statsForUser(userId);
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Cursor encoding — kept out of the class because it is pure and testable alone.
+   --------------------------------------------------------------------------- */
+
+function encodeCursor(row) {
+  const createdAt =
+    row.createdAt instanceof Date ? row.createdAt.toISOString() : row.createdAt;
+  return Buffer.from(`${createdAt}|${row.id}`).toString("base64url");
+}
+
+function decodeCursor(cursor) {
+  if (!cursor) return null;
+
+  try {
+    const [createdAt, id] = Buffer.from(cursor, "base64url")
+      .toString("utf8")
+      .split("|");
+
+    if (!createdAt || !id) return null;
+    return { createdAt, id };
+  } catch {
+    // A malformed cursor is a client bug, not an outage. Serving page one is a
+    // better answer than a 500 — and the alternative, throwing, would let anyone
+    // trigger a 400 storm by fuzzing the query string.
+    return null;
   }
 }
