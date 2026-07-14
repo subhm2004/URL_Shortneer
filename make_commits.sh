@@ -376,6 +376,88 @@ the server remains the only thing enforcing it: it owns the reserved-word list a
 the 'already taken' answer, and it is the only one that can." \
   frontend/src/components/Shortener.tsx frontend/src/app/page.tsx
 
+# ---- rate limiting --------------------------------------------------------
+
+commit "feat(security): rate limiting with a token bucket
+
+A URL shortener with no rate limit is an abuse tool: /api/shorten is how a spammer
+mints phishing links on your domain in bulk, and an unlimited /api/auth/login is a
+CPU-exhaustion attack with a free password guess attached, because bcrypt is slow
+by design.
+
+Token bucket, chosen over the three obvious alternatives for a stated reason.
+Fixed-window lets 2x the limit through across a boundary. Sliding-window log grows
+its memory with traffic — a strange property for the thing whose job is to survive
+a flood. Sliding-window counter forbids bursts, and bursts are the *normal* shape
+here: someone pastes four links in ten seconds and then nothing for an hour.
+Refusing their fourth link is punishing a real user to stop an attacker who could
+have waited. Token bucket allows the burst and caps the sustained rate — which is
+what AWS, Stripe and GitHub all use a variant of.
+
+Three buckets, because the three endpoints are abused differently; a Null Object
+limiter when it's disabled, so the middleware keeps exactly one path; and the IETF
+RateLimit-* headers plus Retry-After, so a well-behaved client backs off before it
+is refused rather than after. Behind the Strategy interface, a Redis-backed sibling
+is the fix for multi-instance and nothing else changes.
+
+Deliberately NOT applied to the redirect: that is the product. A popular link should
+be hammered — throttling it would throttle the very success the app exists for." \
+  app/rateLimit app/middleware/rateLimit.js app/config/index.js \
+  app/container.js app/server.js app/routes/index.js
+
+# ---- link management ------------------------------------------------------
+
+commit "perf(db): keyset pagination and edit tracking
+
+OFFSET pagination is wrong twice: it is O(n) — deep pages make Postgres walk and
+discard every row before them — and it is unstable, so a link created while someone
+is on page 2 shifts every row down one and they see a row twice or never. Keyset
+compares the (created_at, id) tuple against the last row seen: O(log n) on the
+index, and immune to inserts because the cursor names a position in the data, not a
+count of rows. The index is widened to cover the whole key, and id is the tiebreak
+so a page boundary between two same-millisecond rows can't drop or duplicate one." \
+  app/db/migrations/003_links_management.sql
+
+commit "feat(links): paginate, delete, and repoint
+
+my-links now returns a page and an opaque cursor rather than every link a user has
+ever created — fine at ten, fatal at ten thousand. The cursor is opaque on purpose:
+decode it and the client is coupled to a pagination scheme we can then never change.
+
+DELETE and PATCH enforce ownership in the WHERE clause, not a SELECT-then-write —
+one round trip, and no TOCTOU gap where the row changes owner between the two
+statements. Both report someone else's link as 404, never 403: a 403 confirms the
+link exists and belongs to somebody.
+
+Two hazards the code has to answer for:
+
+- Editing re-runs the full validation chain. Skipping it would be a hole straight
+  through every rule: shorten something harmless, then repoint it to
+  javascript:alert(1).
+- The caching decorator evicts on delete and on edit. Forget that line and the
+  redirect — which reads from the cache — keeps serving a link that is gone from
+  Postgres, for a full TTL, while its owner watches the delete button do nothing." \
+  app/repositories/UrlRepository.js app/repositories/CachedUrlRepository.js \
+  app/services/UrlService.js app/controllers/LinkController.js
+
+commit "fix(analytics): rank top links in SQL, not in Node
+
+overview() sorted every one of a user's links in Node to find the busiest five.
+Wasteful even when it worked — and once my-links became paginated, wrong: it would
+have ranked the top five out of whichever twenty rows the first page happened to
+hold. It's now ORDER BY click_count DESC LIMIT 5, where it always should have been." \
+  app/services/AnalyticsService.js app/repositories/UrlRepository.js \
+  app/repositories/CachedUrlRepository.js
+
+commit "feat(dashboard): delete, edit, and load-more
+
+Row actions with confirm-and-edit modals — deletion names the click count it will
+destroy, because it cascades and there is no undo. Editing says plainly that the
+short code stays the same, since that is the whole reason to edit rather than
+recreate. Load-more appends a page rather than refetching, so it keeps scroll
+position. The modal closes on Escape and on an outside click, both." \
+  frontend/src/app/dashboard/page.tsx frontend/src/lib/api.ts frontend/src/lib/types.ts
+
 # ---- fixes ----------------------------------------------------------------
 
 commit "fix(app): report a busy port legibly
@@ -386,17 +468,40 @@ previous run that was never stopped, and the fix is one \`lsof\` away — so the
 now says that." \
   app/index.js
 
-commit "test: poll for click convergence instead of sleeping
+commit "test: 42 unit tests, and the DI seam pays for itself
 
-The 50-concurrent-clicks check asserted after a fixed 3s sleep, but clicks are
-written *after* the response is sent — that is the entire point of the Observer
-seam, and it makes the count eventually consistent, not immediately so. 50 clicks
-are 100 inserts through a pool of 10, which against a remote Postgres lands right
-around the 3s it waited. It passed locally and would have failed in CI at random.
+The README kept claiming a unit test for UrlService 'hands it a fake repository —
+no Postgres, no Express, no network'. This makes that true. Forty-two tests run in
+about 200ms against injected fakes, which is the entire return on the
+dependency-injection seam: nothing is imported, so everything can be replaced.
 
-A flaky check is worse than no check: people learn to re-run it. And this is *the*
-check guarding the lost-increment fix." \
-  app/scripts/smoke.mjs
+They cover the logic with edges, not the plumbing — collision retry and its
+give-up, the login enumeration guard, the Google-account bcrypt crash, keyset
+pagination's fetch-one-extra probe and its clamp, ownership-as-404, and the token
+bucket's refill curve. That last one is why the limiter's clock is injected: 'one
+token every six seconds' is verified against a fake clock in microseconds, instead
+of by actually waiting six seconds — which is how test suites get slow enough that
+people stop running them.
+
+Uses node:test, already in Node 20. No new dependency for something the runtime
+ships." \
+  app/test app/rateLimit/TokenBucketLimiter.js app/package.json
+
+commit "test: extend the smoke test to the new surface, and keep it honest
+
+Grows from 37 checks to 54: pagination (no row seen twice across pages, a malformed
+cursor serving page one rather than a 500), delete and edit (the validation chain
+re-running on edit, ownership as 404, and — the one that matters — the redirect
+going dead the instant a link is deleted, which only fails if the cache isn't
+evicted), and rate limiting (the bucket holding exactly its limit, 429 carrying
+Retry-After, and the redirect never being throttled).
+
+The concurrency check now polls for convergence rather than sleeping. Clicks are
+written after the response — the point of the Observer seam — so the count is
+eventually consistent. A fixed 3s sleep raced the writes against a remote Postgres
+and would have failed in CI at random. A flaky check is worse than no check: people
+learn to re-run it, and this is the check guarding the lost-increment fix." \
+  app/scripts/smoke.mjs .github/workflows/ci.yml
 
 commit "fix(chat): allow the assistant 60 seconds
 
@@ -434,12 +539,18 @@ that will bite you, because every one of them cost time to learn:
 - the backend and frontend each need the other's URL, so the order matters" \
   README.md DEPLOYMENT.md .gitignore
 
-# ---- anything not named above --------------------------------------------
+commit "chore: add the commit script" \
+  make_commits.sh
+
+# ---- safety net -----------------------------------------------------------
+# Nothing should reach here — every changed path is named above. If something
+# does, it's a file added after this script was last updated, and a labelled
+# catch-all is better than leaving it uncommitted.
 
 if ! $DRY_RUN && [[ -n "$(git status --porcelain)" ]]; then
   git add -A
-  git commit -q -m "chore: remaining files from the rewrite"
-  printf '%3d. %s\n' "$((++COUNT))" "chore: remaining files from the rewrite"
+  git commit -q -m "chore: remaining files"
+  printf '%3d. %s\n' "$((++COUNT))" "chore: remaining files"
 fi
 
 echo
