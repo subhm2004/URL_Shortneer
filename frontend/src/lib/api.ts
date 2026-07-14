@@ -45,7 +45,7 @@ const BASE = process.env.NEXT_PUBLIC_API_URL ?? "";
 type Auth = "required" | "optional" | "none";
 
 interface RequestOptions {
-  method?: "GET" | "POST";
+  method?: "GET" | "POST" | "PATCH" | "DELETE";
   body?: unknown;
   auth?: Auth;
   signal?: AbortSignal;
@@ -199,9 +199,57 @@ export async function shorten(
   };
 }
 
-export async function myLinks(): Promise<ShortUrl[]> {
-  const res = await request<ShortUrl[]>("/api/links/my-links", { auth: "required" });
-  return res.data ?? [];
+export interface LinkPage {
+  links: ShortUrl[];
+  /** Opaque. Pass it back to fetch the next page; null means there isn't one. */
+  nextCursor: string | null;
+}
+
+/**
+ * One page of links.
+ *
+ * The cursor is opaque on purpose — it encodes (created_at, id), but decoding it
+ * here would couple the client to the server's pagination scheme and freeze it
+ * forever. We pass it back exactly as we received it.
+ */
+export async function myLinks(
+  { limit = 20, cursor }: { limit?: number; cursor?: string | null } = {},
+): Promise<LinkPage> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (cursor) params.set("cursor", cursor);
+
+  const res = await request<ShortUrl[]>(
+    `/api/links/my-links?${params}`,
+    { auth: "required" },
+  );
+
+  return {
+    links: res.data ?? [],
+    nextCursor: (res as { nextCursor?: string | null }).nextCursor ?? null,
+  };
+}
+
+/** Deletes a link. The backend answers 404 — never 403 — for someone else's. */
+export async function deleteLink(urlCode: string): Promise<void> {
+  await request(`/api/links/${encodeURIComponent(urlCode)}`, {
+    method: "DELETE",
+    auth: "required",
+  });
+}
+
+/**
+ * Repoints a link at a new destination. The short code doesn't change — that is
+ * the point: everyone who already has the link keeps working.
+ */
+export async function repointLink(
+  urlCode: string,
+  longUrl: string,
+): Promise<ShortUrl> {
+  const res = await request<{ url: ShortUrl }>(
+    `/api/links/${encodeURIComponent(urlCode)}`,
+    { method: "PATCH", body: { longUrl }, auth: "required" },
+  );
+  return res.data!.url;
 }
 
 export async function clicksByDay(days = 30): Promise<DayCount[]> {

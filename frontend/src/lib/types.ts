@@ -5,6 +5,8 @@ export interface ApiEnvelope<T> {
   data?: T;
   count?: number;
   token?: string;
+  /** Keyset pagination cursor. Opaque — pass it back untouched. */
+  nextCursor?: string | null;
 }
 
 export interface ShortUrl {
