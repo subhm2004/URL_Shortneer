@@ -1,3 +1,4 @@
+import cookieParser from "cookie-parser";
 import cors from "cors";
 import express from "express";
 import config from "./config/index.js";
@@ -23,11 +24,19 @@ export default function createApp(container) {
 
   app.use(express.json({ limit: "16kb" }));
 
+  // The app is otherwise cookie-free — the JWT lives in localStorage, because the
+  // /mcp page has to show it to the user. This is here for exactly one thing: the
+  // OAuth `state` nonce, which must be httpOnly and must survive Google's
+  // redirect, and therefore cannot live in localStorage.
+  app.use(cookieParser());
+
   app.get("/health", (_req, res) => {
     res.json({ success: true, status: "ok", env: config.env });
   });
 
-  const { api, redirect } = buildRoutes(container.controllers);
+  const { api, redirect } = buildRoutes(container.controllers, {
+    google: container.services.googleAuthService,
+  });
 
   app.use("/api", api);
   app.use("/", redirect); // last — matches /:code

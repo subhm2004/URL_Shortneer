@@ -90,6 +90,33 @@ const config = Object.freeze({
     minPasswordLength: int("MIN_PASSWORD_LENGTH", 8),
   }),
 
+  /**
+   * Google OAuth. Entirely optional — with no client id configured the routes
+   * simply aren't mounted and the frontend hides the button, so the app runs
+   * exactly as before. Nothing here is required to boot.
+   */
+  google: Object.freeze({
+    clientId: process.env.GOOGLE_CLIENT_ID || null,
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET || null,
+
+    /**
+     * Must match a redirect URI registered in the Google Cloud console, byte for
+     * byte — trailing slashes and http-vs-https included. A mismatch is the
+     * single most common reason this flow fails, and Google's error says only
+     * "redirect_uri_mismatch".
+     */
+    redirectUri:
+      process.env.GOOGLE_REDIRECT_URI ||
+      `${(process.env.BASE_URL || "http://localhost:5050").replace(/\/+$/, "")}/api/auth/google/callback`,
+
+    get enabled() {
+      return Boolean(this.clientId && this.clientSecret);
+    },
+  }),
+
+  /** Where the OAuth flow sends the browser back to once we've issued our JWT. */
+  frontendUrl: (process.env.FRONTEND_URL || "http://localhost:3000").replace(/\/+$/, ""),
+
   shortCode: Object.freeze({
     /** Selects the code-generation Strategy. See strategies/shortcode/ */
     strategy: process.env.SHORT_CODE_STRATEGY || "nanoid",

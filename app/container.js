@@ -12,6 +12,7 @@ import UserRepository from "./repositories/UserRepository.js";
 
 import AnalyticsService from "./services/AnalyticsService.js";
 import AuthService from "./services/AuthService.js";
+import GoogleAuthService from "./services/GoogleAuthService.js";
 import UrlService from "./services/UrlService.js";
 
 import AuthController from "./controllers/AuthController.js";
@@ -57,6 +58,11 @@ export function buildContainer() {
   // ---- services -----------------------------------------------------------
   const authService = new AuthService({ userRepository, eventBus, config });
 
+  // Knows about Google; knows nothing about our users. AuthService is the other
+  // way round. The only thing crossing between them is a plain profile object —
+  // so adding GitHub later means a sibling of this class and no change here.
+  const googleAuthService = new GoogleAuthService({ config });
+
   const urlService = new UrlService({
     urlRepository,
     urlValidator,
@@ -78,7 +84,7 @@ export function buildContainer() {
 
   // ---- controllers --------------------------------------------------------
   const controllers = {
-    auth: new AuthController({ authService }),
+    auth: new AuthController({ authService, googleAuthService, config }),
     url: new UrlController({ urlService }),
     link: new LinkController({ urlService, analyticsService }),
   };
@@ -86,6 +92,7 @@ export function buildContainer() {
   logger.info("Container built", {
     shortCodeStrategy: config.shortCode.strategy,
     cache: config.cache.enabled ? "in-memory" : "disabled",
+    googleOAuth: googleAuthService.enabled ? "enabled" : "not configured",
   });
 
   return {
@@ -93,7 +100,7 @@ export function buildContainer() {
     eventBus,
     cache,
     repositories: { userRepository, urlRepository, clickRepository },
-    services: { authService, urlService, analyticsService },
+    services: { authService, googleAuthService, urlService, analyticsService },
     controllers,
   };
 }
