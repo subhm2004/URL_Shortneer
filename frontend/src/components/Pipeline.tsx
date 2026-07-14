@@ -1,48 +1,55 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import MatrixRain from "./MatrixRain";
+import TypeText from "./TypeText";
 
 /**
- * The centrepiece: as a real POST /api/shorten runs, the layers it passes
- * through light up in order.
+ * The terminal. As a real POST /api/shorten runs, the work it does prints itself
+ * out, line by line, the way a machine reports in.
  *
- * One honesty rule governs this component — the only measured number it prints
- * is `latencyMs`, the round-trip the caller actually timed. The server does not
- * report per-stage durations, so we do not invent any. The ticks are ordering,
- * not timings.
+ * One rule governs every pixel: **nothing here is invented.** No fake hex
+ * addresses, no fabricated per-stage timings, no "0x7fff… allocated" to look
+ * busy. Every check listed is a check the server genuinely performs, and
+ * `latencyMs` is the round-trip the caller actually measured. The server doesn't
+ * report per-stage durations, so none are shown.
+ *
+ * The typing, the scanlines, the rain — those are how it's *revealed*, not what
+ * is claimed. That line matters: the moment this prints plausible nonsense to
+ * look impressive, nothing else on it can be believed either.
  */
 
 export type PipelineState = "idle" | "running" | "done" | "error";
 
+/** The request never left the browser — no stage of it ever ran. */
+export const NETWORK_FAILURE = -1;
+
 const STAGES = [
   {
     id: "validate",
-    call: "UrlValidator.validate()",
-    layer: "Chain of Responsibility",
-    detail: "Required → MaxLength → Parsable → Protocol → PublicHost → NoSelfRef",
+    op: "validating target url",
+    steps: ["protocol allowlist", "public host", "max length", "self-reference"],
   },
   {
     id: "generate",
-    call: "ShortCodeStrategy.generate()",
-    layer: "Strategy + Factory",
-    detail: "NanoIdStrategy · 56-char alphabet · length 8",
+    op: "minting short code",
+    steps: ["56-char alphabet", "8 characters", "collision retry armed"],
   },
   {
     id: "persist",
-    call: "UrlRepository.create()",
-    layer: "Repository + Decorator",
-    detail: "INSERT INTO urls · unique(url_code) arbitrates collisions",
+    op: "writing to postgres",
+    steps: ["INSERT INTO urls", "unique(url_code)"],
   },
   {
     id: "publish",
-    call: "EventBus.publish(link.created)",
-    layer: "Observer",
-    detail: "2 subscribers · runs after the response is sent",
+    op: "dispatching event",
+    steps: ["link.created", "2 subscribers"],
     async: true,
   },
 ] as const;
 
-const STAGE_MS = 260;
+/** How long each stage waits before it starts printing. */
+const STAGE_MS = 460;
 
 const prefersReduced = () =>
   typeof window !== "undefined" &&
@@ -53,19 +60,27 @@ interface Props {
   latencyMs?: number | null;
   code?: string | null;
   error?: string;
-  /** Rendered under the result line — the short URL, the copy button, etc. */
+  /** Index of the stage that rejected, or NETWORK_FAILURE. */
+  failedStage?: number;
   children?: React.ReactNode;
 }
 
-export default function Pipeline({ state, latencyMs, code, error, children }: Props) {
+export default function Pipeline({
+  state,
+  latencyMs,
+  code,
+  error,
+  failedStage = 0,
+  children,
+}: Props) {
   /**
    * Only the successful run animates, so only it needs state. The initial value
    * comes from a lazy initialiser rather than an effect: a reduced-motion viewer
    * starts fully revealed and never sees a timer.
    *
-   * The parent remounts this via `key` on each new request, and that is what
-   * resets the reveal — setting state synchronously inside the effect would
-   * schedule a second render pass on every state change.
+   * The parent remounts this via `key` on each request, and that is what resets
+   * the reveal — setting state synchronously inside an effect would schedule a
+   * second render pass on every state change.
    */
   const [revealed, setRevealed] = useState(() =>
     prefersReduced() ? STAGES.length : 0,
@@ -75,85 +90,186 @@ export default function Pipeline({ state, latencyMs, code, error, children }: Pr
     if (state !== "done" || prefersReduced()) return;
 
     const timers = STAGES.map((_, i) =>
-      setTimeout(() => setRevealed(i + 1), (i + 1) * STAGE_MS),
+      setTimeout(() => setRevealed(i + 1), i * STAGE_MS),
     );
     return () => timers.forEach(clearTimeout);
   }, [state]);
 
   if (state === "idle") return null;
 
-  // Derived, not stored. Validation is the only stage that can reject, so an
-  // error lights the first one red and everything after it is never reached.
-  const lit = state === "error" ? 1 : state === "done" ? revealed : 0;
+  const networkFailed = state === "error" && failedStage === NETWORK_FAILURE;
+  const live = state === "running" || (state === "done" && revealed < STAGES.length);
+  const lit = state === "error" ? failedStage : state === "done" ? revealed : 0;
 
   return (
-    <div className="terminal" role="status" aria-live="polite">
-      <div className="terminal-head">
-        <span className="text-fg-2">
-          <span className="prompt mr-2">$</span>
-          POST /api/shorten
+    <div
+      className={`terminal ${live ? "terminal-live" : ""}`}
+      role="status"
+      aria-live="polite"
+    >
+      <MatrixRain />
+
+      {/* ---- chrome ---- */}
+      <div className="term-chrome">
+        <span className="term-dots" aria-hidden="true">
+          <i />
+          <i />
+          <i />
         </span>
-        <span className="text-[11px] tabular-nums text-faint">
-          {state === "running"
-            ? "running…"
-            : state === "error"
-              ? "rejected"
-              : latencyMs != null
-                ? `${latencyMs}ms round-trip`
-                : null}
+        <span className="term-title">trunc://shorten</span>
+        <span className="term-meta">
+          {state === "running" ? (
+            <span className="text-matrix">
+              executing<Dots />
+            </span>
+          ) : networkFailed ? (
+            "no response"
+          ) : state === "error" ? (
+            <span className="text-danger">rejected</span>
+          ) : latencyMs != null ? (
+            `${latencyMs}ms`
+          ) : null}
         </span>
       </div>
 
-      <ol className="terminal-body">
-        {STAGES.map((stage, i) => {
-          const failed = state === "error" && i === 0;
-          const done = !failed && i < lit;
-          const active = !failed && i === lit && state !== "done";
-          const skipped = state === "error" && i > 0;
+      {/* ---- body ---- */}
+      <div className="term-body">
+        <p className="term-cmd">
+          <span className="prompt">&gt;</span> POST /api/shorten
+        </p>
 
-          const cls = [
-            "stage",
-            done && "stage-done",
-            active && "stage-active",
-            failed && "stage-failed",
-            skipped && "stage-skipped",
-          ]
-            .filter(Boolean)
-            .join(" ");
+        {/* The request never left. Naming a stage here would be a lie — none ran. */}
+        {networkFailed && (
+          <div className="glitch-in mt-4">
+            <p className="term-op text-danger">
+              <span className="term-idx">[----]</span> ✕ request never reached the
+              server
+            </p>
+            <LogRow label={error ?? "no response"} status="FAIL" failed />
+          </div>
+        )}
 
-          return (
-            <li key={stage.id} className={cls}>
-              <span className="stage-mark" aria-hidden="true">
-                {failed ? "✕" : done ? "✓" : active ? "⟳" : "·"}
-              </span>
+        <ol className={networkFailed ? "opacity-20" : ""}>
+          {STAGES.map((stage, i) => {
+            const failed = state === "error" && !networkFailed && i === failedStage;
+            const done = !failed && i < lit;
+            const active = !failed && i === lit && state !== "done";
+            const skipped = state === "error" && (networkFailed || i > failedStage);
 
-              <span className="flex min-w-0 flex-col">
-                <span className="stage-call">{stage.call}</span>
-                <span className="stage-layer">{stage.layer}</span>
-                <span className="stage-detail">
-                  {failed ? error : stage.detail}
-                </span>
-              </span>
+            return (
+              <li
+                key={stage.id}
+                className={[
+                  "term-stage",
+                  done && "glitch-in",
+                  failed && "glitch-in",
+                  !done && !failed && !active && "opacity-25",
+                  skipped && "opacity-[0.12]",
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
+              >
+                <p
+                  className={`term-op ${failed ? "text-danger" : done ? "text-fg" : "text-faint"}`}
+                >
+                  <span className="term-idx">
+                    [{String(i + 1).padStart(4, "0")}]
+                  </span>{" "}
+                  <span className={failed ? "text-danger" : "prompt"}>
+                    {failed ? "✕" : active ? "▸" : "▸"}
+                  </span>{" "}
+                  {done || failed ? (
+                    <TypeText text={stage.op} speed={13} />
+                  ) : (
+                    stage.op
+                  )}
+                  {active && <span className="type-caret" aria-hidden="true" />}
+                </p>
 
-              {"async" in stage && stage.async && done && (
-                <span className="async-pill">async</span>
-              )}
-            </li>
-          );
-        })}
-      </ol>
+                {/* On a rejection the sub-steps are replaced by the reason.
+                    Printing "protocol [ OK ]" next to a red ✕ would be a flat lie. */}
+                {failed ? (
+                  <LogRow label={error ?? "rejected"} status="FAIL" failed />
+                ) : (
+                  stage.steps.map((step) => (
+                    <LogRow
+                      key={step}
+                      label={step}
+                      status={
+                        done
+                          ? "async" in stage && stage.async
+                            ? "ASYNC"
+                            : "OK"
+                          : "····"
+                      }
+                      pending={!done}
+                    />
+                  ))
+                )}
+              </li>
+            );
+          })}
+        </ol>
 
-      {/* Gated on the last stage having lit, not merely on `done`. The code is the
-          payoff — it should land after the pipeline finishes, not race it. */}
-      {state === "done" && code && lit >= STAGES.length && (
-        <div className="border-t border-border-soft px-5 py-4 text-[13px]">
-          <span className="prompt mr-2">→</span>
-          <span className="text-faint">url_code = </span>
-          {children}
-        </div>
-      )}
+        {/* Gated on the last stage having landed, not merely on `done`. The code
+            is the payoff — it should arrive after the log, not race it. */}
+        {state === "done" && code && lit >= STAGES.length && (
+          <p className="term-out">
+            <span className="prompt">&gt;&gt;</span> url_code resolved{" "}
+            {children}
+            <span className="type-caret" aria-hidden="true" />
+          </p>
+        )}
+      </div>
     </div>
   );
+}
+
+/**
+ * A log line with leader dots and a status bracket — the shape of every boot
+ * sequence and init script ever written, which is exactly why it reads as one.
+ */
+function LogRow({
+  label,
+  status,
+  failed = false,
+  pending = false,
+}: {
+  label: string;
+  status: string;
+  failed?: boolean;
+  pending?: boolean;
+}) {
+  return (
+    <p className="log-row">
+      <span
+        className={`log-label ${failed ? "text-danger" : pending ? "text-faint" : "text-fg-2"}`}
+      >
+        {label}
+      </span>
+      <span className="log-dots" aria-hidden="true" />
+      <span
+        className={`log-status ${
+          failed ? "text-danger" : pending ? "text-faint" : "text-matrix"
+        }`}
+      >
+        [ {status} ]
+      </span>
+    </p>
+  );
+}
+
+/** Three dots that cycle while the request is in flight. */
+function Dots() {
+  const [n, setN] = useState(0);
+
+  useEffect(() => {
+    if (prefersReduced()) return;
+    const id = setInterval(() => setN((v) => (v + 1) % 4), 320);
+    return () => clearInterval(id);
+  }, []);
+
+  return <span className="inline-block w-4 text-left">{".".repeat(n)}</span>;
 }
 
 export { STAGES };
