@@ -44,6 +44,7 @@ every piece of it.
 - [API](#api)
 - [MCP server](#mcp-server)
 - [Configuration](#configuration)
+- [Deployment](DEPLOYMENT.md) — Render + Vercel + Neon, step by step
 
 ---
 
