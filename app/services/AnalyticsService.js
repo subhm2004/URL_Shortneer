@@ -22,15 +22,19 @@ export default class AnalyticsService {
     return this.#clicks.clicksByDayForUser(userId, AnalyticsService.parseDays(days));
   }
 
+  /**
+   * Totals, plus the five busiest links.
+   *
+   * Both come from SQL. This used to pull every link the user had ever created
+   * into Node and sort them there — wasteful even when it worked, and outright
+   * wrong once findByUser became paginated: it would have ranked the top five out
+   * of whichever twenty rows the first page happened to contain.
+   */
   async overview(userId) {
-    const [stats, links] = await Promise.all([
+    const [stats, topLinks] = await Promise.all([
       this.#urls.statsForUser(userId),
-      this.#urls.findByUser(userId),
+      this.#urls.topLinksForUser(userId, 5),
     ]);
-
-    const topLinks = [...links]
-      .sort((a, b) => b.clickCount - a.clickCount)
-      .slice(0, 5);
 
     return { ...stats, topLinks };
   }
