@@ -1,0 +1,551 @@
+@import "tailwindcss";
+
+/* =============================================================================
+   TRUNC · DARK DESIGN SYSTEM
+
+   Dark-only, deliberately. The product is about watching a request execute —
+   that reads as an instrument panel, and instrument panels are dark.
+
+   Two typefaces, each with a job:
+     Inter          display + UI. Heavy, tight, confident.
+     IBM Plex Mono  anything the machine says — the terminal, code, short codes.
+   The split is the point: prose is human, output is machine.
+
+   Every colour is declared once, here. No raw hex below this block.
+   ============================================================================= */
+
+:root {
+  /* ---- surfaces: near-black base, lifted in small steps -------------------- */
+  --bg: #0a0a0a;
+  --surface: #101010;
+  --surface-2: #161616;
+  --surface-3: #1c1c1c;
+  --terminal: #0d0d0d; /* darker than the page — the terminal recedes */
+
+  /* ---- text --------------------------------------------------------------- */
+  --fg: #fafafa;
+  --fg-2: #d4d4d4;
+  --muted: #8f8f8f;
+  --faint: #5c5c5c;
+
+  /* ---- lines. On dark, a border must be LIGHTER than its surface. A darker
+          line reads as a smudge, not an edge. -------------------------------- */
+  --border: #232323;
+  --border-soft: #181818;
+  --border-strong: #383838;
+
+  /* ---- accent is white. On a black canvas white is the loudest colour there
+          is; a bright hue here would fight the terminal for attention. ------- */
+  --accent: #ffffff;
+  --accent-on: #0a0a0a;
+
+  /* ---- signal colours, lifted so they hold up against black ---------------- */
+  --success: #3ddc84;
+  --danger: #ff5f56;
+  --warn: #f5a623;
+  --matrix: #37f712; /* reserved for the terminal */
+
+  /* ---- elevation. A shadow alone is invisible on black, so depth is a
+          hairline ring plus a soft ambient shadow. --------------------------- */
+  --ring: 0 0 0 1px var(--border);
+  --ring-strong: 0 0 0 1px var(--border-strong);
+  --elev-1: 0 0 0 1px var(--border), 0 4px 16px -8px rgb(0 0 0 / 0.8);
+  --elev-2: 0 0 0 1px var(--border), 0 24px 60px -24px rgb(0 0 0 / 0.9);
+  --elev-3: 0 0 0 1px var(--border-strong), 0 40px 90px -30px rgb(0 0 0 / 0.95);
+  --glow-white: 0 0 90px -24px rgb(255 255 255 / 0.1);
+  --glow-matrix: 0 0 28px -8px color-mix(in oklab, var(--matrix) 50%, transparent);
+
+  --focus: 0 0 0 3px rgb(255 255 255 / 0.2);
+
+  /* ---- motion ------------------------------------------------------------- */
+  --fast: 120ms;
+  --base: 240ms;
+  --slow: 500ms;
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+
+  color-scheme: dark;
+}
+
+/* Tailwind v4 bridge — makes the tokens available as utilities (bg-bg, text-fg…) */
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-terminal: var(--terminal);
+  --color-fg: var(--fg);
+  --color-fg-2: var(--fg-2);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-border: var(--border);
+  --color-border-soft: var(--border-soft);
+  --color-border-strong: var(--border-strong);
+  --color-accent: var(--accent);
+  --color-accent-on: var(--accent-on);
+  --color-success: var(--success);
+  --color-danger: var(--danger);
+  --color-warn: var(--warn);
+  --color-matrix: var(--matrix);
+
+  --font-sans: var(--font-inter), system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, monospace;
+}
+
+/* =============================================================================
+   Base
+   ============================================================================= */
+
+* {
+  border-color: var(--border);
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-inter), system-ui, sans-serif;
+  font-size: 15px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
+}
+
+::selection {
+  background: color-mix(in oklab, var(--matrix) 28%, transparent);
+  color: var(--fg);
+}
+
+/* A thin, unobtrusive scrollbar. The default light one is jarring on black. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--surface-3);
+  border-radius: 99px;
+  border: 2px solid var(--bg);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--border-strong);
+}
+
+/* =============================================================================
+   Type
+   ============================================================================= */
+
+.display {
+  font-family: var(--font-inter), system-ui, sans-serif;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  line-height: 0.98;
+}
+
+/* The hero's headline. The gradient fades the type toward the bottom, which
+   makes it feel lit from above rather than painted flat. */
+.display-gradient {
+  background: linear-gradient(
+    180deg,
+    var(--fg) 0%,
+    #b8b8b8 45%,
+    #6e6e6e 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.mono {
+  font-family: var(--font-plex-mono), ui-monospace, monospace;
+}
+
+/* =============================================================================
+   Grid backdrop
+   ============================================================================= */
+
+.grid-bg {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(to right, var(--border-soft) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--border-soft) 1px, transparent 1px);
+  background-size: 56px 56px;
+  /* Fades the grid out toward the edges so it reads as texture, not a table. */
+  mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, #000 10%, transparent 70%);
+  -webkit-mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, #000 10%, transparent 70%);
+}
+
+/* A single soft light source behind the hero. */
+.spotlight {
+  position: absolute;
+  left: 50%;
+  top: -10%;
+  width: 900px;
+  height: 500px;
+  transform: translateX(-50%);
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse at center,
+    rgb(255 255 255 / 0.05) 0%,
+    transparent 65%
+  );
+}
+
+/* =============================================================================
+   Buttons
+   ============================================================================= */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 46px;
+  padding: 0 22px;
+  border-radius: var(--radius, 10px);
+  border: 1px solid transparent;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background var(--fast) var(--ease),
+    border-color var(--fast) var(--ease),
+    color var(--fast) var(--ease),
+    transform var(--fast) var(--ease),
+    box-shadow var(--base) var(--ease);
+}
+.btn:focus-visible {
+  outline: none;
+  box-shadow: var(--focus);
+}
+.btn:active {
+  transform: translateY(1px);
+}
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: var(--accent-on);
+  border-color: var(--accent);
+}
+.btn-primary:hover:not(:disabled) {
+  background: #e8e8e8;
+  box-shadow: var(--glow-white);
+}
+
+.btn-secondary {
+  background: var(--surface);
+  color: var(--fg);
+  border-color: var(--border);
+}
+.btn-secondary:hover:not(:disabled) {
+  background: var(--surface-2);
+  border-color: var(--border-strong);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--muted);
+}
+.btn-ghost:hover:not(:disabled) {
+  color: var(--fg);
+  background: var(--surface);
+}
+
+.btn-sm {
+  height: 34px;
+  padding: 0 14px;
+  font-size: 13px;
+}
+
+.btn .arrow {
+  transition: transform var(--base) var(--ease);
+}
+.btn:hover .arrow {
+  transform: translateX(3px);
+}
+
+/* =============================================================================
+   Pill badge — the "live" chip above the headline
+   ============================================================================= */
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  height: 34px;
+  padding: 0 16px;
+  border-radius: 99px;
+  background: var(--surface);
+  box-shadow: var(--ring);
+  font-size: 13px;
+  color: var(--fg-2);
+  font-weight: 500;
+}
+
+.pill-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--success) 18%, transparent);
+  animation: pulse 2.2s var(--ease) infinite;
+  flex: none;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.35; }
+}
+
+/* =============================================================================
+   Cards, inputs
+   ============================================================================= */
+
+.card {
+  background: var(--surface);
+  border-radius: 14px;
+  box-shadow: var(--elev-1);
+}
+
+.card-raised {
+  background: var(--surface);
+  border-radius: 16px;
+  box-shadow: var(--elev-2);
+}
+
+.input {
+  width: 100%;
+  height: 48px;
+  padding-inline: 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--fg);
+  font-size: 14px;
+  transition:
+    border-color var(--fast) var(--ease),
+    box-shadow var(--fast) var(--ease),
+    background var(--fast) var(--ease);
+}
+.input::placeholder {
+  color: var(--faint);
+}
+
+/**
+ * For the URL field, which has a `$` sitting inside it. This has to be a class
+ * rather than a Tailwind `pl-9`: plain CSS in this file outranks Tailwind's
+ * utility layer, so `.input`'s own padding would win and the prompt would sit on
+ * top of the first character.
+ */
+.input-prompted {
+  padding-left: 38px;
+}
+.input:focus {
+  outline: none;
+  background: var(--surface-2);
+  border-color: var(--border-strong);
+  box-shadow: var(--focus);
+}
+.input-error {
+  border-color: color-mix(in oklab, var(--danger) 60%, transparent);
+}
+
+.label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--fg-2);
+}
+
+/* =============================================================================
+   Terminal — the pipeline card. Kept from the original design because it was
+   already the best thing on the page.
+   ============================================================================= */
+
+.terminal {
+  background: var(--terminal);
+  border-radius: 14px;
+  box-shadow: var(--elev-2);
+  font-family: var(--font-plex-mono), ui-monospace, monospace;
+  overflow: hidden;
+}
+
+.terminal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border-soft);
+  font-size: 13px;
+}
+
+.terminal-body {
+  padding: 8px 12px 16px;
+}
+
+.prompt {
+  color: var(--matrix);
+  user-select: none;
+}
+
+/* ---- one stage row ---- */
+.stage {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 10px;
+  border-radius: 8px;
+  opacity: 0.28;
+  transition:
+    opacity var(--base) var(--ease),
+    background var(--base) var(--ease);
+}
+.stage-done { opacity: 1; }
+.stage-active {
+  opacity: 1;
+  background: var(--surface-2);
+}
+.stage-failed {
+  opacity: 1;
+  background: color-mix(in oklab, var(--danger) 12%, var(--terminal));
+}
+.stage-skipped { opacity: 0.12; }
+
+.stage-mark {
+  flex: none;
+  width: 16px;
+  text-align: center;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--faint);
+}
+.stage-done .stage-mark   { color: var(--matrix); }
+.stage-failed .stage-mark { color: var(--danger); }
+.stage-active .stage-mark {
+  color: var(--fg);
+  display: inline-block;
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.stage-call  { font-size: 13.5px; color: var(--fg); }
+.stage-layer {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--matrix);
+  opacity: 0.72;
+  margin-top: 2px;
+}
+.stage-detail {
+  font-size: 11.5px;
+  color: var(--faint);
+  margin-top: 3px;
+  overflow-wrap: anywhere;
+}
+.stage-failed .stage-detail { color: var(--danger); }
+
+.async-pill {
+  flex: none;
+  align-self: center;
+  margin-left: auto;
+  padding: 3px 10px;
+  border-radius: 99px;
+  border: 1px dashed var(--border-strong);
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+/* =============================================================================
+   Scramble — the decrypt effect. Characters flicker before they settle.
+   ============================================================================= */
+
+.scramble-char {
+  display: inline-block;
+}
+/* A character still cycling: dim, green, and jittering by a hair. */
+.scramble-char[data-settled="false"] {
+  color: var(--matrix);
+  opacity: 0.55;
+  animation: jitter 90ms steps(2) infinite;
+}
+.scramble-char[data-settled="true"] {
+  color: var(--matrix);
+  text-shadow: var(--glow-matrix);
+}
+
+@keyframes jitter {
+  0%   { transform: translateY(0); }
+  100% { transform: translateY(-1px); }
+}
+
+/* The moment the code resolves, the whole line flashes once. */
+.resolve-flash {
+  animation: flash var(--slow) var(--ease) 1;
+}
+@keyframes flash {
+  0%   { text-shadow: 0 0 30px color-mix(in oklab, var(--matrix) 90%, transparent); }
+  100% { text-shadow: var(--glow-matrix); }
+}
+
+/* =============================================================================
+   Reveal on scroll
+   ============================================================================= */
+
+.reveal {
+  opacity: 0;
+  transform: translateY(18px);
+  transition:
+    opacity 700ms var(--ease),
+    transform 700ms var(--ease);
+}
+.reveal-in {
+  opacity: 1;
+  transform: none;
+}
+
+/* One-shot entrance for something that has just arrived (the finished link). */
+.slide-up {
+  animation: slide-up var(--slow) var(--ease) both;
+}
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* =============================================================================
+   Motion opt-out. Everything above degrades to its finished state.
+   ============================================================================= */
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  .reveal { opacity: 1; transform: none; }
+}

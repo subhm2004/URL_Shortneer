@@ -80,10 +80,14 @@ by hand: `npm run migrate`.)
 # ---- frontend (new terminal) ----
 cd frontend
 npm install
-npm run dev            # → http://localhost:5173
+npm run dev            # → http://localhost:3000
 ```
 
-Open **http://localhost:5173** and shorten something.
+Open **http://localhost:3000** and shorten something.
+
+> The frontend proxies `/api` to the backend in development (see
+> `frontend/next.config.ts`), so the browser makes same-origin requests and CORS
+> never enters the picture locally.
 
 > [!NOTE]
 > **The backend runs on 5050, not 5000.** On macOS, port 5000 is held by the
@@ -176,7 +180,7 @@ hard to change, unsafe, or slow without it. The code for each is below — read 
 | [09](#09--observer) | **Observer** | `core/EventBus` | Every visitor waiting on a DB write before being redirected |
 | [10](#10--builder) | **Builder** | `core/ApiResponse` | Five hand-rolled response shapes that drifted apart |
 | [11](#11--dependency-injection) | **Dependency Injection** | `container.js` | Unit tests that need a live database |
-| [12](#12--facade) | **Facade** | `frontend/…/HttpClient` | The same twenty lines of `fetch` in three files |
+| [12](#12--facade) | **Facade** | `frontend/src/lib/api.ts` | The same twenty lines of `fetch` in three files |
 
 ---
 
@@ -680,33 +684,42 @@ singletons scattered across thirty files.
 
 *One entry point for every call the frontend makes to the backend.*
 
-```js
-// frontend/src/services/HttpClient.js
-class HttpClient {
-  async #request(method, path, { body, auth = "optional" } = {}) {
-    const headers = {};
-    if (body !== undefined) headers["Content-Type"] = "application/json";
+```ts
+// frontend/src/lib/api.ts
 
-    // "required" → must have a token   "optional" → send if we have one
-    // "none"     → never send it (login/register)
-    if (auth !== "none") {
-      const token = this.#tokens.get();
-      if (token) headers.Authorization = `Bearer ${token}`;
-      else if (auth === "required") throw new ApiError("You need to sign in first.", 401);
-    }
+/** "required" fails fast without a token; "optional" sends one if we have it. */
+type Auth = "required" | "optional" | "none";
 
-    const response = await fetch(`${this.#baseUrl}${path}`, { method, headers, ... });
-    // …one place that parses JSON, checks res.ok, and throws a typed ApiError
+async function request<T>(
+  path: string,
+  { method = "GET", body, auth = "optional" }: RequestOptions = {},
+): Promise<ApiEnvelope<T>> {
+  const headers: Record<string, string> = {};
+  if (body !== undefined) headers["Content-Type"] = "application/json";
+
+  if (auth !== "none") {
+    const token = tokenStore.get();
+    if (token) headers.Authorization = `Bearer ${token}`;
+    else if (auth === "required") throw new ApiError("You need to sign in first.", 401);
   }
+
+  // …one place that fetches, parses JSON, checks res.ok, and throws a typed ApiError
 }
 ```
 
-The three service files collapse to almost nothing:
+Every call site collapses to one line, and the auth policy is part of the call:
 
-```js
-// frontend/src/services/linkService.js
-export function getUserLinks()          { return http.get("/api/links/my-links",   { auth: "required" }); }
-export function getClicksByDay(days=30) { return http.get(`/api/links/clicks-by-day?days=${days}`, { auth: "required" }); }
+```ts
+// auth: "none" — a stale token must not ride along with a login attempt
+export async function login(input: { email: string; password: string }) { … }
+
+// anonymous shortening is a feature, so the token is optional here
+export async function shorten(longUrl: string, customAlias?: string) { … }
+
+export async function myLinks(): Promise<ShortUrl[]> {
+  const res = await request<ShortUrl[]>("/api/links/my-links", { auth: "required" });
+  return res.data ?? [];
+}
 ```
 
 **Why it earns its place.** The three service files each repeated the same twenty
@@ -829,7 +842,7 @@ Full docs: **[mcp-server/README.md](mcp-server/README.md)**.
 | `JWT_SECRET` | — | **Required.** Changing it invalidates every existing session. |
 | `PORT` | `5050` | See the macOS note in [Quick start](#quick-start). |
 | `BASE_URL` | `http://localhost:5050` | Origin short links are minted against. Short URLs are **derived** from this, not stored — so moving domains doesn't break existing links. |
-| `ALLOWED_ORIGINS` | `http://localhost:5173` | CORS origins, comma-separated. |
+| `ALLOWED_ORIGINS` | `http://localhost:3000` | CORS origins, comma-separated. |
 | `SHORT_CODE_STRATEGY` | `nanoid` | `nanoid` \| `base62` — see [Strategy](#06--strategy). |
 | `SHORT_CODE_LENGTH` | `8` | |
 | `CACHE_ENABLED` | `true` | The redirect-path cache. `false` injects the [`NullCache`](#05--null-object). |
@@ -869,13 +882,17 @@ app/                       Backend — Express + Postgres
   ├─ server.js             App factory
   └─ container.js          Composition root                  → Dependency Injection
 
-frontend/                  React + Vite + Tailwind v4
+frontend/                  Next.js 15 · TypeScript · Tailwind v4
   └─ src/
-     ├─ pages/             Landing · Dashboard · Login · Register · McpGuide
-     ├─ components/        Pipeline (the landing animation) · charts · nav
-     └─ services/
-         ├─ HttpClient.js  One entry point to the API        → Facade
-         └─ tokenStore.js  The only module that knows where the JWT lives
+     ├─ app/               Landing · Dashboard · Login · Register · MCP guide
+     ├─ components/
+     │   ├─ Pipeline.tsx     The terminal — layers light up as the request runs
+     │   ├─ ScrambleText.tsx The short code decrypting into place
+     │   └─ Shortener.tsx    Form → pipeline → decrypted code → link
+     ├─ context/           AuthProvider
+     └─ lib/
+         ├─ api.ts         One typed entry point to the API   → Facade
+         └─ tokenStore.ts  The only module that knows where the JWT lives
 
 mcp-server/                TypeScript — stdio + HTTP transports
 ```

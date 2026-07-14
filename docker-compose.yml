@@ -80,24 +80,36 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      # Build args, not environment: Next inlines NEXT_PUBLIC_* into the client
+      # bundle when it compiles. Passing them at runtime would have no effect.
+      #
+      # The browser — not this container — is what calls the API, so the URL has
+      # to be one the browser can reach. `http://backend:5000` only resolves
+      # inside the compose network, which is why this is the public origin.
       args:
-        VITE_API_URL: ""
-        VITE_HOSTED_MCP_URL: ${PUBLIC_BASE_URL}/mcp
+        NEXT_PUBLIC_API_URL: ${PUBLIC_BASE_URL}
+        NEXT_PUBLIC_MCP_URL: ${PUBLIC_BASE_URL}/mcp
     container_name: trunc-frontend
     restart: unless-stopped
+    # Next serves on 3000 (a Node process), where the old Vite build was static
+    # files behind nginx on 80.
     ports:
-      - "${UI_PORT:-80}:80"
+      - "${UI_PORT:-3000}:3000"
     depends_on:
       backend:
         condition: service_healthy
       mcp:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1/"]
+      test:
+        - "CMD"
+        - "node"
+        - "-e"
+        - "fetch('http://127.0.0.1:3000/').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 5s
+      start_period: 15s
     networks:
       - trunc-net
 

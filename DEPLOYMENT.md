@@ -7,14 +7,14 @@ Four pieces, three providers, all on free tiers:
 | **Database** | [Neon](https://neon.tech) | Serverless Postgres. You already have this. |
 | **Backend** (`app/`) | [Render](https://render.com) | Needs a long-running Node process — it serves the redirects. |
 | **MCP server** (`mcp-server/`) | [Render](https://render.com) | Same: a long-running HTTP service. |
-| **Frontend** (`frontend/`) | [Vercel](https://vercel.com) | It's a static Vite build. Vercel does this best. |
+| **Frontend** (`frontend/`) | [Vercel](https://vercel.com) | It's a Next.js app. Vercel builds Next better than anywhere else. |
 
 ```
                     ┌──────────────┐
    browser ────────▶│    Vercel    │  the app UI
                     │  (frontend)  │
                     └──────┬───────┘
-                           │ VITE_API_URL
+                           │ NEXT_PUBLIC_API_URL
                            ▼
                     ┌──────────────┐        ┌──────────┐
    short link ─────▶│    Render    │───────▶│   Neon   │
@@ -43,8 +43,7 @@ https://trunc-api.onrender.com/aB12xY9z     ✅ works
 https://trunc.vercel.app/aB12xY9z           ❌ shows the SPA's 404 page
 ```
 
-That second one fails because `frontend/vercel.json` rewrites *every* path to
-`index.html` — Vercel never even asks your backend. This is correct behaviour for
+That second one fails because the Next app owns every path it is given — Vercel never even asks your backend. This is correct behaviour for
 a single-page app, and it's why `BASE_URL` must point at Render.
 
 If you want pretty links (`trunc.sh/aB12xY9z`), put a **custom domain on the
@@ -194,7 +193,7 @@ curl https://trunc-mcp.onrender.com/health
 
 | Field | Value |
 |:--|:--|
-| **Framework Preset** | Vite (it should autodetect) |
+| **Framework Preset** | Next.js (it autodetects) |
 | **Root Directory** | `frontend` ← **click "Edit" and set this** |
 | **Build Command** | `npm run build` (default) |
 | **Output Directory** | `dist` (default) |
@@ -203,15 +202,15 @@ curl https://trunc-mcp.onrender.com/health
 
 | Key | Value |
 |:--|:--|
-| `VITE_API_URL` | `https://trunc-api.onrender.com` |
-| `VITE_HOSTED_MCP_URL` | `https://trunc-mcp.onrender.com/mcp` |
+| `NEXT_PUBLIC_API_URL` | `https://trunc-api.onrender.com` |
+| `NEXT_PUBLIC_MCP_URL` | `https://trunc-mcp.onrender.com/mcp` |
 
-> `VITE_API_URL` is **not optional in production.** Locally it's empty, because the
-> Vite dev server proxies `/api` to your backend. On Vercel there is no proxy — if
-> this is unset, the frontend calls `https://trunc.vercel.app/api/shorten`, which
-> doesn't exist, and every request 404s.
+> `NEXT_PUBLIC_API_URL` is **not optional in production.** Locally, `next.config.ts` rewrites
+> `/api` to your backend, so the browser makes same-origin requests. On Vercel that
+> rewrite still runs — but it needs to know where to point, and this is how it
+> finds out.
 >
-> Vite inlines `VITE_*` vars **at build time**, not runtime. Change one, and you must
+> Next inlines `NEXT_PUBLIC_*` vars **at build time**, not runtime. Change one, and you must
 > **redeploy** for it to take effect. Setting it in the dashboard and hitting refresh
 > does nothing.
 
@@ -254,8 +253,8 @@ where to find it.
 | Backend | `BASE_URL` | → **itself** | `https://trunc-api.onrender.com` |
 | Backend | `ALLOWED_ORIGINS` | → Vercel | `https://trunc.vercel.app` |
 | MCP | `SHORTENER_API_BASE` | → Backend | `https://trunc-api.onrender.com` |
-| Frontend | `VITE_API_URL` | → Backend | `https://trunc-api.onrender.com` |
-| Frontend | `VITE_HOSTED_MCP_URL` | → MCP | `https://trunc-mcp.onrender.com/mcp` |
+| Frontend | `NEXT_PUBLIC_API_URL` | → Backend | `https://trunc-api.onrender.com` |
+| Frontend | `NEXT_PUBLIC_MCP_URL` | → MCP | `https://trunc-mcp.onrender.com/mcp` |
 
 Read it as a sentence: *the backend mints links against itself, lets the Vercel app
 in, and talks to Neon. The MCP server and the frontend both talk to the backend.*
@@ -310,8 +309,8 @@ BASE_URL=https://trunc.sh
 ALLOWED_ORIGINS=https://app.trunc.sh
 
 # Vercel
-VITE_API_URL=https://trunc.sh
-VITE_HOSTED_MCP_URL=https://mcp.trunc.sh/mcp
+NEXT_PUBLIC_API_URL=https://trunc.sh
+NEXT_PUBLIC_MCP_URL=https://mcp.trunc.sh/mcp
 ```
 
 Existing links keep working. `shortUrl` is *derived* from `BASE_URL` at read time,
@@ -327,8 +326,8 @@ be the scheme + host with **no trailing slash**: `https://trunc.vercel.app`, not
 `https://trunc.vercel.app/`.
 
 **API calls 404 against your Vercel domain.**
-`VITE_API_URL` wasn't set at build time. Set it in Vercel → Settings → Environment
-Variables, then **redeploy** — Vite bakes it into the bundle.
+`NEXT_PUBLIC_API_URL` wasn't set at build time. Set it in Vercel → Settings → Environment
+Variables, then **redeploy** — Next bakes it into the bundle.
 
 **Backend boot fails: `Missing required environment variable(s): DATABASE_URL`.**
 Exactly what it says. The config validates at boot on purpose, so you find out here
