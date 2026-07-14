@@ -51,10 +51,75 @@ export default class UrlRepository extends BaseRepository {
     );
   }
 
-  findByUser(userId) {
+  /**
+   * One page of a user's links, newest first.
+   *
+   * KEYSET pagination, not OFFSET. Offset is the obvious choice and it is wrong
+   * twice over:
+   *
+   *   - It is O(n). `OFFSET 10000` makes Postgres walk and discard ten thousand
+   *     rows before returning any, so deep pages get slower and slower.
+   *   - It is *unstable*. Create a link while someone is on page 2 and every row
+   *     shifts down one — they see a row twice, or never see one at all.
+   *
+   * Comparing the (created_at, id) tuple against the last row seen is O(log n) on
+   * the index, and immune to inserts: the cursor names a *position in the data*,
+   * not a count of rows.
+   *
+   * id is the tiebreak — two links created in the same millisecond would
+   * otherwise have no stable order, and a page boundary between them would drop
+   * or duplicate one.
+   */
+  findByUser(userId, { limit = 20, cursor = null } = {}) {
+    if (cursor) {
+      return this.many(
+        `SELECT * FROM urls
+          WHERE user_id = $1
+            AND (created_at, id) < ($2::timestamptz, $3::uuid)
+          ORDER BY created_at DESC, id DESC
+          LIMIT $4`,
+        [userId, cursor.createdAt, cursor.id, limit],
+      );
+    }
+
     return this.many(
-      `SELECT * FROM urls WHERE user_id = $1 ORDER BY created_at DESC`,
-      [userId],
+      `SELECT * FROM urls
+        WHERE user_id = $1
+        ORDER BY created_at DESC, id DESC
+        LIMIT $2`,
+      [userId, limit],
+    );
+  }
+
+  /**
+   * Deletes a link, but only if it belongs to this user.
+   *
+   * The ownership check is in the WHERE clause, not a separate SELECT before the
+   * DELETE. Two reasons, and the second is the one that matters:
+   *
+   *   - one round trip instead of two
+   *   - no TOCTOU gap. A check-then-delete can have the row change owner (or be
+   *     deleted) between the two statements. Here the database decides both
+   *     questions in the same statement, atomically.
+   *
+   * Returns the deleted row so the caller can evict it from the cache — a link
+   * that is gone from Postgres but still cached would keep redirecting.
+   */
+  deleteForUser(urlCode, userId) {
+    return this.one(
+      `DELETE FROM urls WHERE url_code = $1 AND user_id = $2 RETURNING *`,
+      [urlCode, userId],
+    );
+  }
+
+  /** Repoints a link. Same ownership-in-the-WHERE reasoning as delete. */
+  updateLongUrlForUser(urlCode, userId, longUrl) {
+    return this.one(
+      `UPDATE urls
+          SET long_url = $3, updated_at = now()
+        WHERE url_code = $1 AND user_id = $2
+      RETURNING *`,
+      [urlCode, userId, longUrl],
     );
   }
 
@@ -68,6 +133,24 @@ export default class UrlRepository extends BaseRepository {
       [urlId],
     );
     return rows[0]?.click_count ?? null;
+  }
+
+  /**
+   * The user's busiest links.
+   *
+   * In SQL, and not by sorting in Node — which is what the analytics service used
+   * to do, over every link the user had ever created. That was already wasteful;
+   * once findByUser became paginated it was also *wrong*, because it would have
+   * been picking the top five out of whichever twenty rows happened to come back.
+   */
+  topLinksForUser(userId, limit = 5) {
+    return this.many(
+      `SELECT * FROM urls
+        WHERE user_id = $1
+        ORDER BY click_count DESC, created_at DESC
+        LIMIT $2`,
+      [userId, limit],
+    );
   }
 
   async statsForUser(userId) {

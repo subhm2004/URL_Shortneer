@@ -45,6 +45,33 @@ export default class CachedUrlRepository {
   }
 
   /**
+   * Deletes, then evicts.
+   *
+   * This is the whole reason a caching decorator is dangerous to write casually.
+   * The redirect path reads `findByCode` *from the cache*. Delete a link and
+   * forget this line, and Postgres no longer has the row while the cache still
+   * does — so the link keeps redirecting, for a full TTL, after its owner
+   * deleted it. They would watch it working and conclude the delete button is
+   * broken.
+   *
+   * Eviction happens after the write, and only if the write actually removed
+   * something: a delete that matched nothing (wrong owner, wrong code) must not
+   * evict a perfectly good entry.
+   */
+  async deleteForUser(urlCode, userId) {
+    const deleted = await this.#inner.deleteForUser(urlCode, userId);
+    if (deleted) this.#cache.delete(`code:${deleted.urlCode}`);
+    return deleted;
+  }
+
+  /** Same hazard as delete: a stale entry would keep serving the old destination. */
+  async updateLongUrlForUser(urlCode, userId, longUrl) {
+    const updated = await this.#inner.updateLongUrlForUser(urlCode, userId, longUrl);
+    if (updated) this.#cache.delete(`code:${updated.urlCode}`);
+    return updated;
+  }
+
+  /**
    * Not written through to the cache: the cached entry is only used to resolve a
    * redirect target, and a slightly stale click_count there is harmless. The
    * authoritative count is always read from Postgres by the dashboard.
@@ -61,8 +88,12 @@ export default class CachedUrlRepository {
     return this.#inner.findByLongUrlAndUser(longUrl, userId);
   }
 
-  findByUser(userId) {
-    return this.#inner.findByUser(userId);
+  findByUser(userId, options) {
+    return this.#inner.findByUser(userId, options);
+  }
+
+  topLinksForUser(userId, limit) {
+    return this.#inner.topLinksForUser(userId, limit);
   }
 
   statsForUser(userId) {
