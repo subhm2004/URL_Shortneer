@@ -38,6 +38,7 @@ of this README explains every one of them.
 - [API](#api)
 - [MCP server](#mcp-server)
 - [Configuration](#configuration)
+- [**Deployment**](DEPLOYMENT.md) — Render + Vercel + Neon, step by step
 - [Project layout](#project-layout)
 
 ---
