@@ -1,0 +1,11 @@
+// Build-only config. The base tsconfig.json includes the whole of src/ so the
+// editor and `tsc --noEmit` typecheck the tests too — which is what you want
+// while developing.
+//
+// The shipped build is a different question: test files have no business in
+// dist/, and compiling them drags vitest into the production type graph. So the
+// build excludes them.
+{
+  "extends": "./tsconfig.json",
+  "exclude": ["node_modules", "dist", "**/*.test.ts"]
+}

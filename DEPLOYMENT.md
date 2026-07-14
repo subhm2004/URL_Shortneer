@@ -164,8 +164,18 @@ Same flow, different settings.
 |:--|:--|
 | **Name** | `trunc-mcp` |
 | **Root Directory** | `mcp-server` |
-| **Build Command** | `npm install && npm run build` ← TypeScript, so it needs a build |
+| **Build Command** | `npm install --include=dev && npm run build` ← see the note below |
 | **Start Command** | `npm run start:http` |
+
+> **Why `--include=dev`?** TypeScript and `@types/express` are build-time tools —
+> they belong in `devDependencies`, and shipping them to production would be wrong.
+> But setting `NODE_ENV=production` (which you want, for the runtime) makes `npm
+> install` skip devDependencies entirely, so the build then has no compiler and no
+> type definitions. `--include=dev` installs them for the build; they simply aren't
+> used at runtime.
+>
+> The backend (`app/`) has no build step and no devDependencies it needs, so a plain
+> `npm install` is fine there.
 
 3. Environment variables:
 
@@ -336,6 +346,9 @@ Variables, then **redeploy** — Vite bakes it into the bundle.
 **Backend boot fails: `Missing required environment variable(s): DATABASE_URL`.**
 Exactly what it says. The config validates at boot on purpose, so you find out here
 rather than on someone's first request.
+
+**MCP build fails: `Cannot find module 'vitest'` / `Could not find a declaration file for module 'express'`.**
+Your build command is missing `--include=dev`. See [Step 2](#step-2--mcp-server-on-render).
 
 **Backend boot fails with an SSL / self-signed certificate error.**
 You're using a non-pooled or non-TLS connection string. Make sure it ends with
