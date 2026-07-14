@@ -762,9 +762,11 @@ export function buildContainer() {
 }
 ```
 
-**Why.** This is the pattern that makes the other eleven *usable*. A unit test for
-`UrlService` hands it a fake repository — no Postgres, no Express, no network.
-Swapping `InMemoryCache` for Redis is one line here, and nothing downstream notices.
+**Why.** This is the pattern that makes the other eleven *usable* — and it isn't a
+claim, it's [the test suite](#testing-and-ci). A unit test for `UrlService` hands it
+a fake repository and a fake clock and drives it with no Postgres, no Express, no
+network; forty-two of them run in about 200ms. Swapping `InMemoryCache` for Redis is
+one line here, and nothing downstream notices.
 
 The honest cost: *something* has to do the wiring, and it's this file. That's the
 trade — one explicit, readable graph instead of `new` calls and module-level
@@ -1140,7 +1142,7 @@ Three jobs, on every push and pull request.
 ```mermaid
 graph LR
     Push["git push"] --> CI{"GitHub Actions"}
-    CI --> B["backend<br/>smoke test on a real Postgres"]
+    CI --> B["backend<br/>42 unit tests + 54-check smoke test"]
     CI --> M["mcp-server<br/>typecheck · 28 tests · build"]
     CI --> F["frontend<br/>lint · build"]
 
@@ -1150,16 +1152,31 @@ graph LR
     class B,M,F j
 ```
 
-The backend has **no unit tests**. It has something better for this shape of code: a
-smoke test that drives the real server, on a real Postgres, over HTTP — **37 checks**,
-each one corresponding to a bug that actually shipped.
+The backend is tested at two levels, because the two catch different things.
 
-Several of them cannot be caught any other way:
+**42 unit tests** — fast, isolated, no database. They finish in ~200ms, and that
+speed is the dependency-injection seam paying off: every service takes its
+collaborators through its constructor, so a test hands `UrlService` a fake
+repository and a fake clock and drives it with no Postgres, no Express, no network.
+
+```bash
+cd app
+npm test           # 42 tests, ~200ms
+```
+
+They cover the logic that has edges — collision retry, the login enumeration guard,
+the Google-account bcrypt crash, keyset pagination's off-by-one, and the token
+bucket's refill curve (tested against an injected clock, so *"one token every six
+seconds"* is verified in microseconds rather than by waiting six seconds).
+
+**A 54-check smoke test** — the real server, a real Postgres, over HTTP. This is for
+the things a unit test *structurally cannot* reach:
 
 - the **click race** only appears under genuine concurrency
 - the **unique constraint** on `url_code` only exists in the database
 - the **SSRF/XSS rules** only matter against the real validation chain
-- the **401s** only happen if the real middleware is mounted on the real routes
+- the **cache eviction** on delete only matters against a warmed cache
+- the **rate-limit 429s** only happen with the real middleware on the real routes
 
 ```bash
 cd app
