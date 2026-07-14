@@ -408,25 +408,31 @@ mid-flight and the user saw a generic failure with nothing to debug." \
 
 # ---- docs -----------------------------------------------------------------
 
-commit "docs: a deployment guide, and commit it
+commit "docs: one README, and everything in it
 
-It was gitignored, which was the wrong call: the trickiest part of this project is
-not the code, it's wiring four services on three providers so they can find each
-other. That knowledge belongs in the repository, not on one laptop.
+Folds the deployment guide into the README and deletes DEPLOYMENT.md. Two
+documents meant two places to look and two places to drift; the wiring of four
+services across three providers is not a footnote, it is the part people actually
+get stuck on.
 
-Rewritten for what the project actually is now — Next.js, Google OAuth, and the
-Groq assistant — and it leads with the five things that will bite you, because
-every one of them cost time to learn:
+Eight Mermaid diagrams carry the parts that don't survive being written as prose —
+the system topology, the layered backend, the request as it passes through the
+patterns, the schema, the two MCP clients, the Groq tool loop, the OAuth exchange,
+and CI. Each one validated against Mermaid's own parser, because a diagram with a
+syntax error doesn't degrade, it renders as a wall of raw text.
+
+The design-pattern section now leads with what would break without each pattern
+and shows the actual code. And the deployment section leads with the five things
+that will bite you, because every one of them cost time to learn:
 
 - short links are served by the backend, so BASE_URL must point at Render
-- Render's free tier sleeps for ~50s, which is fatal for a redirect
-- NEXT_PUBLIC_ is a security decision: prefix GROQ_API_KEY and it ships to the browser
+- Render's free tier sleeps ~50s, which is merely annoying for a dashboard and
+  fatal for a redirect
+- NEXT_PUBLIC_ is a security decision, not a naming convention: prefix
+  GROQ_API_KEY and the key ships to every browser that loads the page
 - those variables are baked in at build time, so changing one needs a redeploy
 - the backend and frontend each need the other's URL, so the order matters" \
-  DEPLOYMENT.md .gitignore
-
-commit "docs: update the README for the Next.js frontend" \
-  README.md
+  README.md DEPLOYMENT.md .gitignore
 
 # ---- anything not named above --------------------------------------------
 
