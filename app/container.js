@@ -1,4 +1,6 @@
 import InMemoryCache from "./cache/InMemoryCache.js";
+import TokenBucketLimiter from "./rateLimit/TokenBucketLimiter.js";
+import NullRateLimiter from "./rateLimit/NullRateLimiter.js";
 import NullCache from "./cache/NullCache.js";
 import config from "./config/index.js";
 import eventBus from "./core/EventBus.js";
@@ -39,6 +41,25 @@ export function buildContainer() {
         ttlMs: config.cache.ttlMs,
       })
     : new NullCache(); // Null Object — no `if (cache)` guards anywhere downstream.
+
+  /**
+   * Three buckets, because the three endpoints are abused differently: creating
+   * links is the expensive, spammable one; login is brute-forced; reads are
+   * cheap. One shared limit would have to be as strict as the strictest, which
+   * would throttle a perfectly innocent dashboard.
+   *
+   * Disabled ⇒ NullRateLimiter, so the middleware keeps exactly one code path.
+   */
+  const makeLimiter = (bucket) =>
+    config.rateLimit.enabled
+      ? new TokenBucketLimiter(bucket)
+      : new NullRateLimiter();
+
+  const limiters = {
+    shorten: makeLimiter(config.rateLimit.shorten),
+    auth: makeLimiter(config.rateLimit.auth),
+    read: makeLimiter(config.rateLimit.read),
+  };
 
   // ---- repositories -------------------------------------------------------
   const userRepository = new UserRepository();
@@ -93,12 +114,14 @@ export function buildContainer() {
     shortCodeStrategy: config.shortCode.strategy,
     cache: config.cache.enabled ? "in-memory" : "disabled",
     googleOAuth: googleAuthService.enabled ? "enabled" : "not configured",
+    rateLimit: config.rateLimit.enabled ? "token-bucket" : "disabled",
   });
 
   return {
     config,
     eventBus,
     cache,
+    limiters,
     repositories: { userRepository, urlRepository, clickRepository },
     services: { authService, googleAuthService, urlService, analyticsService },
     controllers,

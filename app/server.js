@@ -36,6 +36,7 @@ export default function createApp(container) {
 
   const { api, redirect } = buildRoutes(container.controllers, {
     google: container.services.googleAuthService,
+    limiters: container.limiters,
   });
 
   app.use("/api", api);

@@ -131,6 +131,53 @@ const config = Object.freeze({
     ttlMs: int("CACHE_TTL_MS", 60_000),
   }),
 
+  /**
+   * Rate limits, as token buckets: `capacity` is the burst you may spend at once,
+   * `refillPerSecond` is the rate you earn it back.
+   *
+   * The three buckets exist because the three endpoints are abused differently.
+   *
+   * The REDIRECT is deliberately absent. It is the product — a popular link
+   * *should* be hammered, and limiting it would mean throttling the very success
+   * the app exists to produce. It's also read-mostly and cached, so it's the
+   * cheapest thing here.
+   */
+  rateLimit: Object.freeze({
+    enabled: bool("RATE_LIMIT_ENABLED", true),
+
+    /**
+     * Creating links. The expensive, abusable one: it writes, and it's how a
+     * spammer would mint phishing URLs on your domain in bulk.
+     *
+     * 10 at once, then one every 6s (600/hour sustained). A real person pasting
+     * four links in ten seconds never notices; a script trying to mint thousands
+     * hits the wall immediately.
+     */
+    shorten: Object.freeze({
+      capacity: int("RATE_LIMIT_SHORTEN_BURST", 10),
+      refillPerSecond: Number(process.env.RATE_LIMIT_SHORTEN_RPS ?? 1 / 6),
+    }),
+
+    /**
+     * Login and register. This is brute-force protection, so it is deliberately
+     * mean: 5 attempts, then one every 30 seconds.
+     *
+     * Someone who has genuinely forgotten their password tries three or four
+     * times and stops. A credential-stuffing run makes thousands, and 120/hour is
+     * useless to it.
+     */
+    auth: Object.freeze({
+      capacity: int("RATE_LIMIT_AUTH_BURST", 5),
+      refillPerSecond: Number(process.env.RATE_LIMIT_AUTH_RPS ?? 1 / 30),
+    }),
+
+    /** Reads. Generous — these are cheap, and a busy dashboard is a good sign. */
+    read: Object.freeze({
+      capacity: int("RATE_LIMIT_READ_BURST", 60),
+      refillPerSecond: Number(process.env.RATE_LIMIT_READ_RPS ?? 1),
+    }),
+  }),
+
   logLevel: process.env.LOG_LEVEL || (env === "production" ? "info" : "debug"),
 });
 
