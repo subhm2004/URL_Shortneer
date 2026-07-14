@@ -22,6 +22,20 @@ async function main() {
     });
   });
 
+  // Without this, a busy port emits an unhandled 'error' on the server and the
+  // process dies behind a stack trace that never names the actual problem. The
+  // usual cause is a previous run that was never stopped.
+  server.on("error", (err) => {
+    if (err.code === "EADDRINUSE") {
+      logger.error(
+        `Port ${config.port} is already in use — something else is listening there.`,
+        { hint: `Find it with:  lsof -i :${config.port}` },
+      );
+      process.exit(1);
+    }
+    throw err;
+  });
+
   // Finish in-flight requests and close the pool before exiting, so Postgres
   // isn't left holding connections open after a container restart.
   const shutdown = async (signal) => {
