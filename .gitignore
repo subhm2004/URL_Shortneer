@@ -8,6 +8,10 @@ dist/
 build/
 *.vsix
 
+# Vite's dependency cache. Two of these files got committed once already —
+# they are machine-local build junk, not source.
+.vite/
+
 # Environment files
 .env
 .env.local
@@ -40,5 +44,6 @@ Thumbs.db
 # Project notes (not for commit)
 PAGES.md
 design/
+DEPLOYMENT.md
 
 .mcp.json
