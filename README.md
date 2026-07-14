@@ -1,15 +1,16 @@
 <div align="center">
 
-# Trunc
+<img src=".github/assets/header.svg" width="100%" alt="Trunc — a POST to /api/shorten passing through the validation chain, the short-code strategy, the repository, and the event bus, returning url_code Yw3dcSQK" />
 
-**Cut it short.**
+<br />
 
-A URL shortener with click analytics, a private dashboard, and an MCP server —
-so your AI assistant can shorten links and read your stats from a conversation.
+**A URL shortener with click analytics, a private dashboard, and an MCP server —
+so your AI assistant can shorten links and read your stats from a conversation.**
 
 `Postgres` · `Express` · `React` · `MCP`
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-111111.svg?style=flat-square)](https://opensource.org/licenses/MIT)
+[![CI](https://github.com/subhm2004/URL_Shortneer/actions/workflows/ci.yml/badge.svg)](https://github.com/subhm2004/URL_Shortneer/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-111111.svg?style=flat-square)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D18-111111.svg?style=flat-square)](https://nodejs.org)
 [![Postgres](https://img.shields.io/badge/postgres-14%2B-111111.svg?style=flat-square)](https://postgresql.org)
 [![Patterns](https://img.shields.io/badge/design%20patterns-12-111111.svg?style=flat-square)](#design-patterns)
@@ -22,17 +23,9 @@ Most shorteners hide the machinery. Trunc shows it to you: paste a URL on the
 landing page and every layer the request passes through lights up, in order, as
 the real request runs.
 
-```
-$ POST /api/shorten                                        42ms round-trip
-  ✓ UrlValidator.validate()          CHAIN OF RESPONSIBILITY
-  ✓ ShortCodeStrategy.generate()     STRATEGY + FACTORY
-  ✓ UrlRepository.create()           REPOSITORY + DECORATOR
-  ✓ EventBus.publish(link.created)   OBSERVER              async
-  → url_code = "Yw3dcSQK"
-```
-
-That isn't decoration. It's the actual architecture, and this README explains
-every piece of it.
+**That header isn't decoration.** It's the actual request path — the same four
+layers, in the same order, that a real `POST /api/shorten` goes through. The rest
+of this README explains every one of them.
 
 ---
 
