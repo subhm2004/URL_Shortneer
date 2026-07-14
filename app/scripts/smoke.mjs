@@ -210,6 +210,7 @@ async function run() {
   section("click counting under concurrency");
   {
     const CLICKS = 50;
+    const expected = CLICKS + 1; // +1 for the redirect test above
 
     await Promise.all(
       Array.from({ length: CLICKS }, () =>
@@ -217,20 +218,42 @@ async function run() {
       ),
     );
 
-    // Clicks are recorded by an observer, after the response is sent — so give
-    // the event loop a moment to drain before asserting.
-    await new Promise((r) => setTimeout(r, 3000));
+    /**
+     * Clicks are recorded by an observer, *after* the response is sent — that is
+     * the whole point of the Observer seam, and it means the count is eventually
+     * consistent, not immediately so.
+     *
+     * So poll for convergence instead of sleeping for a guessed duration. A fixed
+     * sleep raced the writes: 50 clicks are 100 inserts through a pool of 10, and
+     * against a remote Postgres that lands right around the 3s this used to wait.
+     * It passed locally and would have started failing in CI at random.
+     *
+     * A flaky check is worse than no check — people learn to re-run it — and this
+     * is *the* check guarding the lost-increment fix.
+     *
+     * Polling also keeps the assertion honest: it converges to exactly `expected`
+     * and stops. It cannot pass by overshooting.
+     */
+    const DEADLINE_MS = 20_000;
+    const started = Date.now();
+    let count = null;
 
-    const { body } = await json("/api/links/my-links", { token });
-    const link = body?.data?.find((l) => l.urlCode === code);
-    const expected = CLICKS + 1; // +1 for the redirect test above
+    while (Date.now() - started < DEADLINE_MS) {
+      const { body } = await json("/api/links/my-links", { token });
+      count = body?.data?.find((l) => l.urlCode === code)?.clickCount ?? null;
+      if (count === expected) break;
+      await new Promise((r) => setTimeout(r, 250));
+    }
+
+    const waited = Date.now() - started;
 
     // The old read-modify-write (read → clickCount++ → save) dropped increments
-    // here: two concurrent clicks read the same value and one write was lost.
+    // here: two concurrent clicks read the same value and one write was lost. No
+    // amount of waiting recovers those, so a timeout is a genuine failure.
     check(
       `${CLICKS} concurrent clicks are all counted (expected ${expected})`,
-      link?.clickCount === expected,
-      `got ${link?.clickCount}`,
+      count === expected,
+      `got ${count} after ${waited}ms`,
     );
   }
 
