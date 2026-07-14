@@ -1,0 +1,171 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# A new push to the same branch makes the in-flight run obsolete.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # The backend has no unit tests — it has this instead: the real server, on a
+  # real Postgres, driven over HTTP. Every check in smoke.mjs corresponds to a
+  # bug that actually shipped, and several of them (the click race, the unique
+  # constraint) simply cannot be caught with a fake repository.
+  # ---------------------------------------------------------------------------
+  backend:
+    name: backend · smoke test on Postgres
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: trunc
+          POSTGRES_PASSWORD: trunc
+          POSTGRES_DB: trunc_test
+        ports:
+          - 5432:5432
+        # Without this the job races the database and fails on connection refused.
+        options: >-
+          --health-cmd "pg_isready -U trunc -d trunc_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://trunc:trunc@localhost:5432/trunc_test
+      JWT_SECRET: ci-only-secret-not-used-anywhere-real
+      PORT: 5050
+      BASE_URL: http://localhost:5050
+      NODE_ENV: test
+      LOG_LEVEL: warn
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install
+        working-directory: app
+        run: npm ci
+
+      - name: Run migrations
+        working-directory: app
+        run: npm run migrate
+
+      - name: Migrations are idempotent
+        working-directory: app
+        # Every deploy runs them at boot, so a second run must be a no-op rather
+        # than an error about an object that already exists.
+        run: npm run migrate
+
+      - name: Start the server
+        working-directory: app
+        run: |
+          npm start > server.log 2>&1 &
+          echo $! > server.pid
+
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:5050/health > /dev/null; then
+              echo "server up after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+
+          echo "server never became healthy"
+          cat server.log
+          exit 1
+
+      - name: Smoke test
+        working-directory: app
+        run: node scripts/smoke.mjs
+
+      - name: Server logs
+        # Runs even when the smoke test fails — which is exactly when you need them.
+        if: always()
+        working-directory: app
+        run: cat server.log || true
+
+      - name: Stop the server
+        if: always()
+        working-directory: app
+        run: kill "$(cat server.pid)" 2>/dev/null || true
+
+  # ---------------------------------------------------------------------------
+  mcp-server:
+    name: mcp-server · typecheck, test, build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: mcp-server/package-lock.json
+
+      - name: Install
+        working-directory: mcp-server
+        run: npm ci
+
+      - name: Typecheck
+        working-directory: mcp-server
+        # The full tsconfig, so the tests are typechecked too — the build config
+        # deliberately excludes them.
+        run: npm run typecheck
+
+      - name: Test
+        working-directory: mcp-server
+        run: npm test
+
+      - name: Build
+        working-directory: mcp-server
+        run: npm run build
+
+      - name: Test files stay out of the build
+        working-directory: mcp-server
+        run: |
+          if ls dist/*.test.js 2>/dev/null; then
+            echo "test files were compiled into dist/ — check tsconfig.build.json"
+            exit 1
+          fi
+          test -f dist/http.js || { echo "dist/http.js missing — start:http would fail"; exit 1; }
+          echo "build output is clean"
+
+  # ---------------------------------------------------------------------------
+  frontend:
+    name: frontend · lint, build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        working-directory: frontend
+        run: npm ci
+
+      - name: Lint
+        working-directory: frontend
+        run: npm run lint
+
+      - name: Build
+        working-directory: frontend
+        run: npm run build
