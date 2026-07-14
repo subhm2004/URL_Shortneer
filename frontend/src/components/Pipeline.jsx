@@ -39,35 +39,37 @@ const STAGES = [
 
 const STAGE_MS = 260;
 
+const prefersReducedMotion = () =>
+  window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
 export default function Pipeline({ state, latencyMs, code, error }) {
-  const [lit, setLit] = useState(0);
+  /**
+   * Only the successful run animates, so only it needs state. The initial value
+   * comes from a lazy initialiser rather than an effect — a reduced-motion
+   * viewer starts fully revealed and never sees a timer.
+   *
+   * The parent remounts this component (via `key`) on each new request, which is
+   * what resets the reveal. That's deliberate: setting state synchronously inside
+   * the effect — which is what this did before — schedules a second render pass
+   * on every single state change, and React's compiler lint flags it for exactly
+   * that reason.
+   */
+  const [revealed, setRevealed] = useState(() =>
+    prefersReducedMotion() ? STAGES.length : 0,
+  );
 
   useEffect(() => {
-    if (state === "idle") {
-      setLit(0);
-      return;
-    }
+    if (state !== "done" || prefersReducedMotion()) return;
 
-    if (state === "error") {
-      // Validation is the only stage that can reject, so light it red and stop.
-      setLit(1);
-      return;
-    }
-
-    if (state !== "done") return;
-
-    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (reduce) {
-      setLit(STAGES.length);
-      return;
-    }
-
-    setLit(0);
     const timers = STAGES.map((_, i) =>
-      setTimeout(() => setLit(i + 1), (i + 1) * STAGE_MS),
+      setTimeout(() => setRevealed(i + 1), (i + 1) * STAGE_MS),
     );
     return () => timers.forEach(clearTimeout);
   }, [state]);
+
+  // Derived, not stored. Validation is the only stage that can reject, so an
+  // error lights the first one red and stops there.
+  const lit = state === "error" ? 1 : state === "done" ? revealed : 0;
 
   if (state === "idle") return null;
 

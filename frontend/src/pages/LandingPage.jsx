@@ -47,6 +47,11 @@ export default function LandingPage() {
   const [copied, setCopied] = useState(false);
   const copyTimer = useRef(null);
 
+  // Bumped on every submit and used as Pipeline's key, so each run remounts it
+  // and its stage reveal starts from zero — instead of Pipeline resetting itself
+  // with a setState inside an effect.
+  const [runId, setRunId] = useState(0);
+
   useEffect(() => () => clearTimeout(copyTimer.current), []);
 
   // Scroll-reveal for the sections below the fold.
@@ -79,6 +84,7 @@ export default function LandingPage() {
     e.preventDefault();
     if (!longUrl.trim() || state === "loading") return;
 
+    setRunId((n) => n + 1);
     setState("loading");
     setError("");
     setResult(null);
@@ -167,6 +173,7 @@ export default function LandingPage() {
           </form>
 
           <Pipeline
+            key={runId}
             state={state}
             latencyMs={latencyMs}
             code={result?.urlCode}

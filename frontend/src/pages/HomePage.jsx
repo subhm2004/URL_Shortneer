@@ -49,7 +49,10 @@ export default function HomePage() {
     if (!shortUrlData?.shortUrl) return;
     try {
       await navigator.clipboard.writeText(shortUrlData.shortUrl);
-    } catch {}
+    } catch {
+      // Don't claim success we didn't have — see DashboardPage.handleCopy.
+      return;
+    }
     setIsCopied(true);
     setTimeout(() => setIsCopied(false), 2000);
   };

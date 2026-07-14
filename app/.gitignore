@@ -1,6 +1,12 @@
-# dependencies (bun install)
+# dependencies
 node_modules
-package-lock.json
+
+# package-lock.json is deliberately NOT ignored. It was — a leftover from a Bun
+# template — which meant the lock file never reached the repo, and CI's `npm ci`
+# (which cannot run without one) failed before it installed anything.
+#
+# An application's lock file belongs in version control: it is what makes the
+# install reproducible.
 
 # output
 out

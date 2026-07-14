@@ -1,4 +1,3 @@
-import React from "react";
 
 const sizeMap = {
   small: "h-4 w-4 border-2",

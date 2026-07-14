@@ -1,6 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { useAuth } from "../context/AuthContext";
+import { useEffect, useMemo, useState } from "react";
+import { useAuth } from "../context/useAuth.js";
 import { getUserLinks, getClicksByDay } from "../services/linkService";
 import Footer from "../components/Footer";
 import ClicksChart from "../components/ClicksChart";
@@ -100,7 +99,6 @@ export default function DashboardPage() {
   const [sortDir, setSortDir] = useState("desc");
 
   const { token, isAuthenticated } = useAuth();
-  const navigate = useNavigate();
 
   useEffect(() => {
     let cancelled = false;
@@ -189,7 +187,13 @@ export default function DashboardPage() {
   async function handleCopy(key, url) {
     try {
       await navigator.clipboard.writeText(url);
-    } catch {}
+    } catch {
+      // The clipboard API rejects on an insecure origin, or when the user denies
+      // permission. Bail out rather than fall through — the old code swallowed
+      // this and still flashed "copied!", telling the user their link was on the
+      // clipboard when nothing had been written to it.
+      return;
+    }
     setCopiedKey(key);
     setTimeout(() => setCopiedKey((k) => (k === key ? null : k)), 1500);
   }

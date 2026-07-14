@@ -1,6 +1,5 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
-import { useAuth } from "../context/AuthContext";
+import { useAuth } from "../context/useAuth.js";
 import Footer from "../components/Footer";
 
 const HOSTED_MCP_URL =
@@ -135,13 +134,23 @@ export default function McpGuidePage() {
       setTokenRevealed(true);
       return;
     }
-    try { await navigator.clipboard.writeText(activeToken); } catch {}
+    try {
+      await navigator.clipboard.writeText(activeToken);
+    } catch {
+      // Especially bad to lie about here: the user would paste an empty
+      // clipboard into their MCP client config and get a confusing 401.
+      return;
+    }
     setTokenCopied(true);
     setTimeout(() => setTokenCopied(false), 2000);
   }
 
   async function handleCopy(kind, text) {
-    try { await navigator.clipboard.writeText(text); } catch {}
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      return;
+    }
     setCopied(kind);
     setTimeout(() => setCopied(null), 2000);
   }
