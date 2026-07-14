@@ -3,12 +3,24 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { ApiError, clicksByDay, myLinks } from "@/lib/api";
+import {
+  ApiError,
+  clicksByDay,
+  deleteLink,
+  myLinks,
+  repointLink,
+} from "@/lib/api";
 import type { DayCount, ShortUrl } from "@/lib/types";
 import { useAuth } from "@/context/AuthProvider";
 import Sparkline from "@/components/Sparkline";
 
 type SortKey = "clicks" | "created";
+
+/**
+ * Deliberately small. The dashboard used to fetch every link a user had ever
+ * created — fine at ten, fatal at ten thousand.
+ */
+const PAGE_SIZE = 20;
 
 export default function DashboardPage() {
   const { isAuthenticated, ready, user } = useAuth();
@@ -21,6 +33,17 @@ export default function DashboardPage() {
   const [error, setError] = useState("");
   const [sort, setSort] = useState<SortKey>("created");
   const [copied, setCopied] = useState<string | null>(null);
+
+  /** Keyset cursor for the next page. null ⇒ we've reached the end. */
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+
+  /** The link the user is being asked to confirm deleting. */
+  const [confirmDelete, setConfirmDelete] = useState<ShortUrl | null>(null);
+  /** The link being edited, and the destination they're typing. */
+  const [editing, setEditing] = useState<ShortUrl | null>(null);
+  const [editUrl, setEditUrl] = useState("");
+  const [rowBusy, setRowBusy] = useState<string | null>(null);
 
   // `ready` guards this: on the first client render the token hasn't been read
   // yet, so isAuthenticated is still false. Redirecting on that would bounce a
@@ -36,12 +59,13 @@ export default function DashboardPage() {
 
     (async () => {
       try {
-        const [linkRows, dayRows] = await Promise.all([
-          myLinks(),
+        const [page, dayRows] = await Promise.all([
+          myLinks({ limit: PAGE_SIZE }),
           clicksByDay(range),
         ]);
         if (cancelled) return;
-        setLinks(linkRows);
+        setLinks(page.links);
+        setCursor(page.nextCursor);
         setDays(dayRows);
       } catch (err) {
         if (cancelled) return;
@@ -88,6 +112,59 @@ export default function DashboardPage() {
     () => days.reduce((sum, d) => sum + d.count, 0),
     [days],
   );
+
+  async function loadMore() {
+    if (!cursor || loadingMore) return;
+
+    setLoadingMore(true);
+    try {
+      const page = await myLinks({ limit: PAGE_SIZE, cursor });
+      setLinks((current) => [...current, ...page.links]);
+      setCursor(page.nextCursor);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not load more.");
+    } finally {
+      setLoadingMore(false);
+    }
+  }
+
+  async function handleDelete(link: ShortUrl) {
+    setRowBusy(link.urlCode);
+    setError("");
+
+    try {
+      await deleteLink(link.urlCode);
+      // Drop it locally rather than refetching the page: a refetch would reset
+      // the user's scroll position and re-request every page they'd loaded.
+      setLinks((current) => current.filter((l) => l.id !== link.id));
+      setConfirmDelete(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not delete that link.");
+    } finally {
+      setRowBusy(null);
+    }
+  }
+
+  async function handleRepoint() {
+    if (!editing) return;
+
+    setRowBusy(editing.urlCode);
+    setError("");
+
+    try {
+      const updated = await repointLink(editing.urlCode, editUrl.trim());
+      setLinks((current) =>
+        current.map((l) => (l.id === updated.id ? updated : l)),
+      );
+      setEditing(null);
+    } catch (err) {
+      // The backend runs the new URL through the same validation chain as a new
+      // link, so this is where "javascript:…" or a private host lands. Show it.
+      setError(err instanceof Error ? err.message : "Could not update that link.");
+    } finally {
+      setRowBusy(null);
+    }
+  }
 
   async function copy(url: string) {
     try {
@@ -320,13 +397,39 @@ export default function DashboardPage() {
                           })}
                         </td>
 
-                        <td className="px-6 py-4 text-right">
-                          <button
-                            onClick={() => copy(link.shortUrl)}
-                            className="btn btn-ghost btn-sm opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
-                          >
-                            {copied === link.shortUrl ? "Copied" : "Copy"}
-                          </button>
+                        <td className="px-6 py-4">
+                          <div className="flex items-center justify-end gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                            <button
+                              onClick={() => copy(link.shortUrl)}
+                              className="btn btn-ghost btn-sm"
+                            >
+                              {copied === link.shortUrl ? "Copied" : "Copy"}
+                            </button>
+
+                            <button
+                              onClick={() => {
+                                setEditing(link);
+                                setEditUrl(link.longUrl);
+                                setError("");
+                              }}
+                              className="btn btn-ghost btn-sm"
+                              aria-label={`Edit /${link.urlCode}`}
+                            >
+                              Edit
+                            </button>
+
+                            <button
+                              onClick={() => {
+                                setConfirmDelete(link);
+                                setError("");
+                              }}
+                              disabled={rowBusy === link.urlCode}
+                              className="btn btn-ghost btn-sm text-danger hover:bg-surface-3"
+                              aria-label={`Delete /${link.urlCode}`}
+                            >
+                              Delete
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -334,8 +437,147 @@ export default function DashboardPage() {
                 </tbody>
               </table>
             </div>
+
+            {/* Keyset pagination: the cursor's existence *is* the "has more"
+                signal, so there's no separate count query to ask. */}
+            {cursor && (
+              <div className="flex justify-center border-t border-border-soft p-5">
+                <button
+                  onClick={loadMore}
+                  disabled={loadingMore}
+                  className="btn btn-secondary btn-sm"
+                >
+                  {loadingMore ? "Loading…" : "Load more"}
+                </button>
+              </div>
+            )}
           </div>
         )}
+      </div>
+
+      {/* ---- edit ---- */}
+      {editing && (
+        <Modal
+          title={`Repoint /${editing.urlCode}`}
+          onClose={() => setEditing(null)}
+        >
+          <p className="text-[13.5px] leading-relaxed text-muted">
+            The short code stays the same — everyone who already has this link
+            keeps working. Only the destination changes.
+          </p>
+
+          <label htmlFor="edit-url" className="label mt-6">
+            New destination
+          </label>
+          <input
+            id="edit-url"
+            type="url"
+            className="input mono text-[13px]"
+            value={editUrl}
+            onChange={(e) => setEditUrl(e.target.value)}
+            autoFocus
+          />
+
+          <div className="mt-7 flex justify-end gap-2">
+            <button
+              onClick={() => setEditing(null)}
+              className="btn btn-secondary btn-sm"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleRepoint}
+              disabled={
+                !editUrl.trim() ||
+                editUrl.trim() === editing.longUrl ||
+                rowBusy === editing.urlCode
+              }
+              className="btn btn-primary btn-sm"
+            >
+              {rowBusy === editing.urlCode ? "Saving…" : "Save"}
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {/* ---- delete ---- */}
+      {confirmDelete && (
+        <Modal
+          title={`Delete /${confirmDelete.urlCode}?`}
+          onClose={() => setConfirmDelete(null)}
+        >
+          {/* Deletion cascades to the clicks table, and there is no undo. Saying
+              so plainly is cheaper than building one. */}
+          <p className="text-[13.5px] leading-relaxed text-muted">
+            The link stops working immediately, and its{" "}
+            <span className="mono text-fg-2">
+              {confirmDelete.clickCount.toLocaleString()}
+            </span>{" "}
+            click{confirmDelete.clickCount === 1 ? "" : "s"} are deleted with it.
+            This cannot be undone.
+          </p>
+
+          <p className="mono mt-4 truncate rounded-lg bg-surface-2 px-3.5 py-2.5 text-[12px] text-faint">
+            {confirmDelete.longUrl}
+          </p>
+
+          <div className="mt-7 flex justify-end gap-2">
+            <button
+              onClick={() => setConfirmDelete(null)}
+              className="btn btn-secondary btn-sm"
+            >
+              Keep it
+            </button>
+            <button
+              onClick={() => handleDelete(confirmDelete)}
+              disabled={rowBusy === confirmDelete.urlCode}
+              className="btn btn-sm border-danger bg-danger text-bg hover:opacity-90"
+            >
+              {rowBusy === confirmDelete.urlCode ? "Deleting…" : "Delete"}
+            </button>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+/**
+ * A modal. Closes on Escape and on a click outside — both, because a dialog that
+ * traps you until you find its button is a dialog people learn to dread.
+ */
+function Modal({
+  title,
+  onClose,
+  children,
+}: {
+  title: string;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 grid place-items-center bg-bg/70 p-5 backdrop-blur-sm"
+      onClick={onClose}
+      role="presentation"
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        className="card-raised slide-up w-full max-w-[460px] p-7"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 className="text-[17px] font-semibold tracking-tight">{title}</h2>
+        {children}
       </div>
     </div>
   );
