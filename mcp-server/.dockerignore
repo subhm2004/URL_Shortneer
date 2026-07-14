@@ -1,0 +1,14 @@
+node_modules
+dist
+src/**/*.test.ts
+.env
+.env.*
+*.log
+.git
+.gitignore
+Dockerfile
+.dockerignore
+README.md
+vitest.config.ts
+.vscode
+.idea
