@@ -7,7 +7,7 @@ Four pieces, three providers, all on free tiers:
 | **Database** | [Neon](https://neon.tech) | Serverless Postgres. You already have this. |
 | **Backend** (`app/`) | [Render](https://render.com) | Needs a long-running Node process — it serves the redirects. |
 | **MCP server** (`mcp-server/`) | [Render](https://render.com) | Same: a long-running HTTP service. |
-| **Frontend** (`ui/`) | [Vercel](https://vercel.com) | It's a static Vite build. Vercel does this best. |
+| **Frontend** (`frontend/`) | [Vercel](https://vercel.com) | It's a static Vite build. Vercel does this best. |
 
 ```
                     ┌──────────────┐
@@ -43,7 +43,7 @@ https://trunc-api.onrender.com/aB12xY9z     ✅ works
 https://trunc.vercel.app/aB12xY9z           ❌ shows the SPA's 404 page
 ```
 
-That second one fails because `ui/vercel.json` rewrites *every* path to
+That second one fails because `frontend/vercel.json` rewrites *every* path to
 `index.html` — Vercel never even asks your backend. This is correct behaviour for
 a single-page app, and it's why `BASE_URL` must point at Render.
 
@@ -76,23 +76,6 @@ Don't skip that last step or every API call from your live site will fail.
 
 ---
 
-## Step 0 — Rotate your database password
-
-You pasted your Neon connection string into a chat. Rotate it before it goes
-anywhere near a production deploy.
-
-1. Neon dashboard → your project → **Roles**
-2. Next to `neondb_owner` → **Reset password**
-3. Copy the **new** connection string — the one ending in `-pooler...`
-
-> Use the **pooled** connection string (the host contains `-pooler`). Render can
-> restart your service and open new connections; the pooler is what keeps that from
-> exhausting Neon's connection limit.
-
-Update `app/.env` locally with the new string too, so local dev keeps working.
-
----
-
 ## Step 1 — Backend on Render
 
 1. Go to [dashboard.render.com](https://dashboard.render.com) → **New** → **Web Service**
@@ -113,7 +96,7 @@ Update `app/.env` locally with the new string too, so local dev keeps working.
 
 | Key | Value |
 |:--|:--|
-| `DATABASE_URL` | your **new** pooled Neon string from Step 0 |
+| `DATABASE_URL` | your Neon connection string |
 | `JWT_SECRET` | generate a fresh one — see below. **Do not reuse your local one.** |
 | `NODE_ENV` | `production` |
 | `BASE_URL` | `https://trunc-api.onrender.com` ← your own Render URL |
@@ -124,6 +107,10 @@ Generate the secret:
 ```bash
 node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
 ```
+
+> **Use Neon's pooled connection string** — the host contains `-pooler`. Render
+> restarts your service on every deploy and opens fresh connections; the pooler is
+> what stops that from exhausting Neon's connection limit.
 
 > **Don't set `PORT`.** Render injects it. Our config reads `process.env.PORT`, so it
 > just works. Hardcoding it will break the health check.
@@ -208,7 +195,7 @@ curl https://trunc-mcp.onrender.com/health
 | Field | Value |
 |:--|:--|
 | **Framework Preset** | Vite (it should autodetect) |
-| **Root Directory** | `ui` ← **click "Edit" and set this** |
+| **Root Directory** | `frontend` ← **click "Edit" and set this** |
 | **Build Command** | `npm run build` (default) |
 | **Output Directory** | `dist` (default) |
 

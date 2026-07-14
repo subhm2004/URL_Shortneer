@@ -84,7 +84,7 @@ by hand: `npm run migrate`.)
 
 ```bash
 # ---- frontend (new terminal) ----
-cd ui
+cd frontend
 npm install
 npm run dev            # → http://localhost:5173
 ```
@@ -170,7 +170,7 @@ was hard to change, unsafe, or slow without it. That's what the last column is f
 | 09 | **Observer** | `core/EventBus` | The redirect responds immediately; the click is recorded on the next tick. |
 | 10 | **Builder** | `core/ApiResponse` | One response envelope, decided once, instead of five that had drifted apart. |
 | 11 | **Dependency Injection** | `container.js` | Everything takes its collaborators in. That's what makes it unit-testable. |
-| 12 | **Facade** | `ui/src/services/HttpClient` | Three UI service files repeated the same fetch/error dance. Now they don't. |
+| 12 | **Facade** | `frontend/src/services/HttpClient` | Three UI service files repeated the same fetch/error dance. Now they don't. |
 
 ### Seeing a seam work
 
@@ -307,7 +307,7 @@ app/            Backend — Express + Postgres
   ├─ observers/      Post-response side-effects
   └─ container.js    Composition root
 
-ui/             Frontend — React + Vite + Tailwind v4
+frontend/       Frontend — React + Vite + Tailwind v4
   └─ src/
      ├─ pages/       LandingPage · Dashboard · Login · Register · McpGuide
      ├─ components/  Pipeline (the landing-page animation) · charts · nav
