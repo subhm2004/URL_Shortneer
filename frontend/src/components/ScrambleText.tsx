@@ -79,11 +79,16 @@ export default function ScrambleText({ text, className = "", onDone }: Props) {
         lastLocked = locked;
 
         setCells(
-          chars.map((char, i) =>
-            i < locked
+          chars.map((char, i) => {
+            // Spaces never scramble. Scrambling one is meaningless — and cycling
+            // a glyph through a gap between words makes the text unreadable while
+            // it settles.
+            if (char === " ") return { char: " ", settled: true };
+
+            return i < locked
               ? { char, settled: true }
-              : { char: randomGlyph(), settled: false },
-          ),
+              : { char: randomGlyph(), settled: false };
+          }),
         );
       }
 
@@ -114,7 +119,16 @@ export default function ScrambleText({ text, className = "", onDone }: Props) {
           data-settled={cell.settled}
           aria-hidden="true"
         >
-          {cell.char}
+          {/*
+            A non-breaking space, not a plain one.
+
+            .scramble-char is display:inline-block, and an inline-block containing
+            only a regular space collapses to zero width — so every space in the
+            text silently disappeared. "CHAIN OF RESPONSIBILITY" rendered as
+            "CHAINOFRESPONSIBILITY". It never showed up while this was only used
+            on short codes, which have no spaces in them.
+          */}
+          {cell.char === " " ? " " : cell.char}
         </span>
       ))}
     </span>
