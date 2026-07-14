@@ -5,8 +5,22 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, shorten } from "@/lib/api";
 import type { ShortUrl } from "@/lib/types";
 import { useAuth } from "@/context/AuthProvider";
-import Pipeline, { type PipelineState } from "./Pipeline";
+import Pipeline, { NETWORK_FAILURE, type PipelineState } from "./Pipeline";
 import ScrambleText from "./ScrambleText";
+
+/**
+ * Maps an HTTP status onto the stage that actually rejected, so the pipeline
+ * points at the truth rather than always blaming validation.
+ *
+ *   0    fetch never got a response — the request didn't reach the server at all
+ *   400  a rule in the validation chain refused it
+ *   409  the code collided at INSERT — that's the repository, not the validator
+ */
+function stageForStatus(status: number): number {
+  if (status === 0) return NETWORK_FAILURE;
+  if (status === 409) return 2; // UrlRepository.create()
+  return 0; // UrlValidator.validate()
+}
 
 /**
  * The whole flow, in one component: form → live pipeline → decrypted code →
@@ -20,9 +34,12 @@ export default function Shortener() {
   const { isAuthenticated } = useAuth();
 
   const [longUrl, setLongUrl] = useState("");
+  const [alias, setAlias] = useState("");
+  const [aliasOpen, setAliasOpen] = useState(false);
   const [state, setState] = useState<PipelineState>("idle");
   const [result, setResult] = useState<ShortUrl | null>(null);
   const [error, setError] = useState("");
+  const [failedStage, setFailedStage] = useState(0);
   const [latencyMs, setLatencyMs] = useState<number | null>(null);
   const [copied, setCopied] = useState(false);
 
@@ -42,10 +59,21 @@ export default function Shortener() {
 
   const onScrambleDone = useCallback(() => setCodeRevealed(true), []);
 
+  /**
+   * Mirrors CustomAliasStrategy's rule on the server: 3–32 characters, letters,
+   * numbers, hyphens and underscores.
+   *
+   * Checked here so the user finds out before a round-trip — NOT instead of the
+   * server, which is the only thing that can actually enforce it, and which also
+   * owns the reserved-word list and the "already taken" answer.
+   */
+  const aliasInvalid =
+    alias.length > 0 && !/^[a-zA-Z0-9_-]{3,32}$/.test(alias);
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const url = longUrl.trim();
-    if (!url || state === "running") return;
+    if (!url || state === "running" || aliasInvalid) return;
 
     setRunId((n) => n + 1);
     setState("running");
@@ -56,15 +84,20 @@ export default function Shortener() {
 
     const started = performance.now();
     try {
-      const { url: created } = await shorten(url);
+      const wanted = alias.trim();
+      const { url: created } = await shorten(url, wanted || undefined);
       setLatencyMs(Math.round(performance.now() - started));
       setResult(created);
       setState("done");
     } catch (err) {
       // The backend's 4xx messages are written for humans — show them verbatim.
-      setError(
-        err instanceof ApiError ? err.message : "Something went wrong.",
-      );
+      if (err instanceof ApiError) {
+        setError(err.message);
+        setFailedStage(stageForStatus(err.status));
+      } else {
+        setError("Something went wrong.");
+        setFailedStage(0);
+      }
       setState("error");
     }
   }
@@ -111,7 +144,7 @@ export default function Shortener() {
         <button
           type="submit"
           className="btn btn-primary sm:w-40"
-          disabled={state === "running" || !longUrl.trim()}
+          disabled={state === "running" || !longUrl.trim() || aliasInvalid}
         >
           {state === "running" ? (
             <>
@@ -125,6 +158,79 @@ export default function Shortener() {
         </button>
       </form>
 
+      {/* ---- custom alias ---- */}
+      <div className="mt-3">
+        {!aliasOpen ? (
+          <button
+            type="button"
+            onClick={() => setAliasOpen(true)}
+            className="mono text-[12px] text-faint transition-colors hover:text-fg"
+          >
+            + want a custom alias?
+          </button>
+        ) : isAuthenticated ? (
+          <div className="slide-up flex flex-col gap-2">
+            <div className="flex items-center gap-2">
+              <div className="flex flex-1 items-center rounded-lg bg-surface px-3.5 shadow-[var(--ring)] focus-within:shadow-[var(--focus)]">
+                <span className="mono flex-none text-[13px] text-faint select-none">
+                  /
+                </span>
+                <input
+                  type="text"
+                  aria-label="Custom alias"
+                  placeholder="my-launch"
+                  maxLength={32}
+                  autoFocus
+                  className="mono h-11 min-w-0 flex-1 bg-transparent px-1 text-[13.5px] text-matrix outline-none placeholder:text-faint"
+                  value={alias}
+                  onChange={(e) => {
+                    setAlias(e.target.value);
+                    if (state === "error") setState("idle");
+                  }}
+                />
+              </div>
+
+              <button
+                type="button"
+                aria-label="Remove custom alias"
+                onClick={() => {
+                  setAlias("");
+                  setAliasOpen(false);
+                }}
+                className="btn btn-ghost btn-sm flex-none"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p
+              className={`mono text-[11.5px] ${aliasInvalid ? "text-danger" : "text-faint"}`}
+            >
+              3–32 characters · letters, numbers, hyphens, underscores
+            </p>
+          </div>
+        ) : (
+          /* The server rejects an alias from an anonymous caller, so saying so
+             here saves the user from typing one only to be turned away. */
+          <div className="slide-up flex flex-wrap items-center gap-x-2 gap-y-1 text-[12.5px] text-muted">
+            <span>Custom aliases need an account —</span>
+            <Link
+              href="/register"
+              className="text-fg underline underline-offset-2 hover:text-matrix"
+            >
+              create one free
+            </Link>
+            <button
+              type="button"
+              onClick={() => setAliasOpen(false)}
+              className="mono ml-1 text-faint hover:text-fg"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+      </div>
+
       {state !== "idle" && (
         <div className="mt-6">
           <Pipeline
@@ -133,6 +239,7 @@ export default function Shortener() {
             latencyMs={latencyMs}
             code={result?.urlCode}
             error={error}
+            failedStage={failedStage}
           >
             {result && (
               <ScrambleText
