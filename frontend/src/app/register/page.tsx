@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { ApiError, register as registerRequest } from "@/lib/api";
 import { useAuth } from "@/context/AuthProvider";
+import GoogleButton from "@/components/GoogleButton";
 
 const MIN_PASSWORD = 8;
 
@@ -54,7 +55,11 @@ export default function RegisterPage() {
           Free. Your links start tracking clicks straight away.
         </p>
 
-        <form onSubmit={handleSubmit} className="mt-8 flex flex-col gap-5">
+        <div className="mt-8 flex flex-col gap-5">
+          <GoogleButton label="Sign up with Google" />
+        </div>
+
+        <form onSubmit={handleSubmit} className="mt-5 flex flex-col gap-5">
           <div>
             <label htmlFor="name" className="label">Name</label>
             <input

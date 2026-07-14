@@ -1,19 +1,36 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useState } from "react";
 import { ApiError, login as loginRequest } from "@/lib/api";
 import { useAuth } from "@/context/AuthProvider";
+import GoogleButton from "@/components/GoogleButton";
 
+// useSearchParams needs a Suspense boundary, or Next bails the whole route out of
+// static rendering at build time.
 export default function LoginPage() {
+  return (
+    <Suspense>
+      <LoginForm />
+    </Suspense>
+  );
+}
+
+function LoginForm() {
   const router = useRouter();
   const { login } = useAuth();
+  const searchParams = useSearchParams();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
+  const [formError, setFormError] = useState("");
   const [busy, setBusy] = useState(false);
+
+  // A failed Google flow can't return JSON — it's a browser redirect — so the
+  // backend sends the reason back as ?error=… and it surfaces here.
+  const error = formError || searchParams.get("error") || "";
+  const setError = setFormError;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -45,7 +62,11 @@ export default function LoginPage() {
           Sign in to see your links and their clicks.
         </p>
 
-        <form onSubmit={handleSubmit} className="mt-8 flex flex-col gap-5">
+        <div className="mt-8 flex flex-col gap-5">
+          <GoogleButton label="Sign in with Google" />
+        </div>
+
+        <form onSubmit={handleSubmit} className="mt-5 flex flex-col gap-5">
           <div>
             <label htmlFor="email" className="label">Email</label>
             <input
