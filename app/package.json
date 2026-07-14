@@ -10,7 +10,7 @@
     "dev": "nodemon index.js",
     "migrate": "node db/migrate.js",
     "smoke": "node scripts/smoke.mjs",
-    "test": "node --test \"test/**/*.test.js\""
+    "test": "node --test test/*.test.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
