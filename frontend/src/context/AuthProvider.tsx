@@ -9,10 +9,14 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { ApiError, me } from "@/lib/api";
 import { tokenStore } from "@/lib/tokenStore";
+import type { User } from "@/lib/types";
 
 interface AuthValue {
   token: string | null;
+  /** null while unknown — either signed out, or the fetch is still in flight. */
+  user: User | null;
   isAuthenticated: boolean;
   /** False until the client has read localStorage — see the note below. */
   ready: boolean;
@@ -24,6 +28,7 @@ const AuthContext = createContext<AuthValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [token, setToken] = useState<string | null>(null);
+  const [user, setUser] = useState<User | null>(null);
   const [ready, setReady] = useState(false);
 
   /**
@@ -41,6 +46,41 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setReady(true);
   }, []);
 
+  /**
+   * The JWT carries only an id, so anything the UI *displays* — name, avatar —
+   * has to be fetched. Doing it here means one request for the whole app instead
+   * of every component that wants a name asking for itself.
+   *
+   * A 401 means the token is stale (expired, or JWT_SECRET rotated). Clearing it
+   * is the right response: leaving it in place would keep every subsequent
+   * request failing while the UI insisted the user was signed in.
+   */
+  useEffect(() => {
+    if (!token) {
+      setUser(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    me()
+      .then((u) => {
+        if (!cancelled) setUser(u);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        if (err instanceof ApiError && err.isAuthError) {
+          tokenStore.clear();
+          setToken(null);
+        }
+        setUser(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
+
   const login = useCallback((next: string) => {
     tokenStore.set(next);
     setToken(next);
@@ -49,6 +89,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(() => {
     tokenStore.clear();
     setToken(null);
+    setUser(null);
   }, []);
 
   // isAuthenticated is derived, never stored. Two pieces of state that must agree
@@ -56,12 +97,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const value = useMemo<AuthValue>(
     () => ({
       token,
+      user,
       isAuthenticated: Boolean(token),
       ready,
       login,
       logout,
     }),
-    [token, ready, login, logout],
+    [token, user, ready, login, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
