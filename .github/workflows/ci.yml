@@ -46,6 +46,20 @@ jobs:
       NODE_ENV: test
       LOG_LEVEL: warn
 
+      # Rate limiting stays ON — turning it off in CI would mean the limiter is
+      # the one thing never exercised, which is precisely backwards for a
+      # component whose entire job is to be correct under abuse.
+      #
+      # The bucket is widened so the functional checks (which create ~20 links)
+      # aren't throttled, and refill is set effectively to zero so the limiter's
+      # own test is deterministic: the smoke test reads RateLimit-Limit from the
+      # response, spends exactly that many tokens, and asserts the next one is a
+      # 429. It adapts to whatever these values are.
+      RATE_LIMIT_SHORTEN_BURST: "40"
+      RATE_LIMIT_SHORTEN_RPS: "0.0001"
+      RATE_LIMIT_AUTH_BURST: "50"
+      RATE_LIMIT_READ_BURST: "500"
+
     steps:
       - uses: actions/checkout@v4
 
@@ -58,6 +72,12 @@ jobs:
       - name: Install
         working-directory: app
         run: npm ci
+
+      # Fast, isolated, no database. If these fail the smoke test below is a waste
+      # of a Postgres — so run them first and fail early.
+      - name: Unit tests
+        working-directory: app
+        run: npm test
 
       - name: Run migrations
         working-directory: app

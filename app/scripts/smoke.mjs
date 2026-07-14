@@ -50,7 +50,7 @@ async function json(path, options = {}) {
   } catch {
     body = { raw: text };
   }
-  return { status: res.status, body };
+  return { status: res.status, body, headers: res.headers };
 }
 
 async function run() {
@@ -270,6 +270,196 @@ async function run() {
     const clamped = await json("/api/links/clicks-by-day?days=99999", { token });
     check("out-of-range days is clamped, not rejected", clamped.status === 200, `got ${clamped.status}`);
     check("clamped to 90 days", clamped.body?.data?.length === 90, `got ${clamped.body?.data?.length}`);
+  }
+
+  // ---- pagination --------------------------------------------------------
+  section("pagination");
+  {
+    // Enough links to need three pages at a size of 5.
+    const made = [];
+    for (let i = 0; i < 12; i++) {
+      const { body } = await json("/api/shorten", {
+        method: "POST",
+        token,
+        body: JSON.stringify({ longUrl: `https://example.com/page/${Date.now()}/${i}` }),
+      });
+      made.push(body?.data?.url?.urlCode);
+    }
+
+    const seen = [];
+    let cursor = null;
+    let pages = 0;
+
+    do {
+      const query = `?limit=5${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
+      const { body } = await json(`/api/links/my-links${query}`, { token });
+      seen.push(...(body?.data ?? []).map((l) => l.urlCode));
+      cursor = body?.nextCursor ?? null;
+      pages++;
+    } while (cursor && pages < 20);
+
+    check("paginates rather than returning everything", pages > 1, `${pages} page(s)`);
+    check("no row appears twice across pages", new Set(seen).size === seen.length);
+    check(
+      "every link created is reachable by paging",
+      made.every((code) => seen.includes(code)),
+    );
+
+    // Keyset pagination survives writes mid-scroll; offset pagination does not.
+    const garbage = await json("/api/links/my-links?cursor=not-a-real-cursor", { token });
+    check(
+      "a malformed cursor serves page one rather than a 500",
+      garbage.status === 200,
+      `got ${garbage.status}`,
+    );
+  }
+
+  // ---- delete and repoint -------------------------------------------------
+  section("delete and repoint");
+  {
+    const target = `https://example.com/editme/${Date.now()}`;
+    const { body: created } = await json("/api/shorten", {
+      method: "POST",
+      token,
+      body: JSON.stringify({ longUrl: target }),
+    });
+    const editCode = created?.data?.url?.urlCode;
+
+    // Warm the cache — this is what makes the eviction check meaningful.
+    await fetch(`${BASE}/${editCode}`, { redirect: "manual" });
+
+    const repointed = await json(`/api/links/${editCode}`, {
+      method: "PATCH",
+      token,
+      body: JSON.stringify({ longUrl: "https://example.com/repointed" }),
+    });
+    check("PATCH repoints a link → 200", repointed.status === 200, `got ${repointed.status}`);
+
+    const afterEdit = await fetch(`${BASE}/${editCode}`, { redirect: "manual" });
+    // If the cache isn't evicted on write, this still points at the old target
+    // for a full TTL — the owner watches their edit do nothing.
+    check(
+      "the redirect follows the new destination (cache evicted)",
+      afterEdit.headers.get("location") === "https://example.com/repointed",
+      `got ${afterEdit.headers.get("location")}`,
+    );
+
+    // Editing must re-run the validation chain. Otherwise: shorten something
+    // harmless, then edit it into javascript: — straight through every rule.
+    const evil = await json(`/api/links/${editCode}`, {
+      method: "PATCH",
+      token,
+      body: JSON.stringify({ longUrl: "javascript:alert(1)" }),
+    });
+    check("PATCH re-runs the validation chain → 400", evil.status === 400, `got ${evil.status}`);
+
+    // A second account must not be able to touch it — and must be told "not
+    // found", not "forbidden": a 403 confirms the link exists.
+    const otherEmail = `smoke-other-${Date.now()}@example.test`;
+    const { body: otherBody } = await json("/api/auth/register", {
+      method: "POST",
+      body: JSON.stringify({ name: "Other", email: otherEmail, password }),
+    });
+    const otherToken = otherBody?.token;
+
+    const stolen = await json(`/api/links/${editCode}`, {
+      method: "DELETE",
+      token: otherToken,
+    });
+    check("deleting someone else's link → 404, not 403", stolen.status === 404, `got ${stolen.status}`);
+
+    const survived = await fetch(`${BASE}/${editCode}`, { redirect: "manual" });
+    check("and the link still works", survived.status === 302, `got ${survived.status}`);
+
+    const gone = await json(`/api/links/${editCode}`, { method: "DELETE", token });
+    check("DELETE own link → 200", gone.status === 200, `got ${gone.status}`);
+
+    const dead = await fetch(`${BASE}/${editCode}`, { redirect: "manual" });
+    check(
+      "the redirect stops working immediately (cache evicted)",
+      dead.status === 404,
+      `got ${dead.status}`,
+    );
+  }
+
+  // ---- rate limiting ------------------------------------------------------
+  section("rate limiting");
+  {
+    /**
+     * A FRESH user, on purpose. Buckets are keyed by user id, so hammering this
+     * one leaves the main test's budget untouched — which is the only reason the
+     * two can coexist in one run.
+     */
+    const rlEmail = `smoke-rl-${Date.now()}@example.test`;
+    const { body: rlBody } = await json("/api/auth/register", {
+      method: "POST",
+      body: JSON.stringify({ name: "RL", email: rlEmail, password }),
+    });
+    const rlToken = rlBody?.token;
+
+    const first = await json("/api/shorten", {
+      method: "POST",
+      token: rlToken,
+      body: JSON.stringify({ longUrl: "https://example.com/rl/0" }),
+    });
+
+    const limit = Number(first.headers.get("RateLimit-Limit"));
+
+    check("RateLimit-Limit header is sent", Number.isFinite(limit) && limit > 0, `got ${limit}`);
+    check(
+      "RateLimit-Remaining is sent and below the limit",
+      Number(first.headers.get("RateLimit-Remaining")) < limit,
+    );
+
+    // Spend the rest of the bucket, then one more. The requests are deliberately
+    // invalid URLs: the limiter runs *before* the handler, so each still costs a
+    // token, but nothing is written and the loop stays fast.
+    let allowed = 1;
+    let blocked = 0;
+    let retryAfter = null;
+
+    for (let i = 0; i < limit + 3; i++) {
+      const res = await json("/api/shorten", {
+        method: "POST",
+        token: rlToken,
+        body: JSON.stringify({ longUrl: "not-a-url" }),
+      });
+
+      if (res.status === 429) {
+        blocked++;
+        retryAfter ??= res.headers.get("Retry-After");
+      } else {
+        allowed++;
+      }
+    }
+
+    check(
+      `the bucket holds exactly ${limit} tokens`,
+      allowed === limit,
+      `${allowed} allowed, ${blocked} blocked`,
+    );
+    check("an exhausted bucket returns 429", blocked > 0);
+    check("429 carries Retry-After", Number(retryAfter) > 0, `got ${retryAfter}`);
+
+    // The redirect is the product. Throttling it would mean throttling the very
+    // success the app exists to produce.
+    const { body: hot } = await json("/api/shorten", {
+      method: "POST",
+      token,
+      body: JSON.stringify({ longUrl: `https://example.com/hot/${Date.now()}` }),
+    });
+    const hotCode = hot?.data?.url?.urlCode;
+
+    const statuses = await Promise.all(
+      Array.from({ length: 80 }, () =>
+        fetch(`${BASE}/${hotCode}`, { redirect: "manual" }).then((r) => r.status),
+      ),
+    );
+    check(
+      "redirects are never rate limited",
+      statuses.every((s) => s === 302),
+      `${statuses.filter((s) => s === 429).length} were 429`,
+    );
   }
 
   // ---- error hygiene -----------------------------------------------------
