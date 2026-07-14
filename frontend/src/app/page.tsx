@@ -2,45 +2,52 @@ import Link from "next/link";
 import Shortener from "@/components/Shortener";
 import Reveal from "@/components/Reveal";
 
-const STACK = ["Postgres", "Express", "Next.js", "TypeScript", "MCP"];
-
-const PATTERNS = [
-  { n: "01", name: "Singleton", where: "config · pool · logger", why: "One Postgres pool per process. A pool per request would exhaust the connection limit." },
-  { n: "02", name: "Repository", where: "User · Url · Click", why: "SQL sits behind an interface, so no service ever imports a database driver." },
-  { n: "03", name: "Template Method", where: "BaseRepository", why: "Subclasses declare the table; they inherit the query and transaction plumbing." },
-  { n: "04", name: "Decorator", where: "CachedUrlRepository", why: "Adds caching to the redirect lookup without a single service knowing it exists." },
-  { n: "05", name: "Null Object", where: "NullCache", why: "Turning the cache off is an injection, not a codebase full of null checks." },
-  { n: "06", name: "Strategy", where: "NanoId · Base62 · Alias", why: "Swap how codes are minted with an env var. No service code moves." },
-  { n: "07", name: "Factory", where: "ShortCodeStrategyFactory", why: "The one place that knows the concrete strategy classes by name." },
-  { n: "08", name: "Chain of Responsibility", where: "UrlValidator", why: "Each rule rejects or passes along. Order is configuration, not control flow." },
-  { n: "09", name: "Observer", where: "EventBus", why: "The redirect answers immediately; clicks are recorded on the next tick." },
-  { n: "10", name: "Builder", where: "ApiResponse", why: "One response envelope, decided once, instead of five that drifted apart." },
-  { n: "11", name: "Dependency Injection", where: "container.ts", why: "Everything takes its collaborators in. That is what makes it testable." },
-  { n: "12", name: "Facade", where: "lib/api.ts", why: "Three service files repeated the same fetch and error dance. Now they don't." },
+const PROMISES = [
+  "No signup to start",
+  "Custom aliases",
+  "Click analytics",
+  "Works with Claude",
 ];
 
-const RECEIPTS = [
+/**
+ * The patterns, grouped by what they *buy you* rather than listed by name.
+ *
+ * They used to be twelve equal cards, each headed by its pattern name. That
+ * ordering is backwards: it asks the reader to already know what a Null Object is
+ * before it will tell them why anyone should care. A visitor who doesn't know the
+ * jargon learns nothing, and one who does learns nothing new either.
+ *
+ * So the claim leads, the evidence follows, and the pattern names sit underneath
+ * as a footnote for whoever wants them. Same twelve patterns; the reader just
+ * isn't made to earn them.
+ */
+const PILLARS = [
   {
-    claim: "50 concurrent clicks → 51 counted",
-    detail:
-      "An atomic UPDATE … SET click_count = click_count + 1. The read-modify-write it replaced silently dropped increments under load.",
+    n: "01",
+    claim: "The database never leaks upward",
+    body: "Every line of SQL lives behind an interface. No service imports a driver, and none of them knows Postgres is down there at all — which is why moving this app off MongoDB rewrote one directory instead of the whole codebase.",
+    patterns: ["repository", "template method", "decorator"],
   },
   {
-    claim: "javascript: and 169.254.169.254 rejected",
-    detail:
-      "A protocol allowlist and a private-host rule. A shortener without them is an XSS vector and an SSRF gadget wearing your own domain.",
+    n: "02",
+    claim: "Swap behaviour, not code",
+    body: "Changing how a short code is minted is one environment variable. A different algorithm, a different alphabet, a different length — and not one line of business logic moves. That is the test of whether a seam is real.",
+    patterns: ["strategy", "factory", "dependency injection"],
   },
   {
-    claim: "Clicks aggregated in Postgres",
-    detail:
-      "generate_series joins a date spine, so quiet days come back as zero. The old version pulled every click into Node and counted them in a Map.",
+    n: "03",
+    claim: "Nothing waits that doesn't have to",
+    body: "The redirect answers before the click is ever written down. Every visitor to every link used to sit and wait on our analytics, on the one code path where speed is the entire product. Now none of them do.",
+    patterns: ["observer", "singleton", "null object"],
   },
   {
-    claim: "urls.url_code is UNIQUE",
-    detail:
-      "It is the redirect key. Without the constraint two links could collide, and one of them would send visitors to the wrong site.",
+    n: "04",
+    claim: "One shape in, one shape out",
+    body: "Every URL runs the same six rules before anything is stored. Every response leaves in the same envelope. Every call from the browser goes through one door. Consistency you don't have to remember to keep.",
+    patterns: ["chain of responsibility", "builder", "facade"],
   },
 ];
+
 
 const STEPS = [
   {
@@ -59,6 +66,25 @@ const STEPS = [
     body: "Each visit is recorded after the redirect has already answered — so the person clicking never waits on our analytics.",
   },
 ];
+
+function Tick() {
+  return (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="var(--matrix)"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="flex-none opacity-70"
+      aria-hidden="true"
+    >
+      <path d="M3 8.5l3.5 3.5L13 5" />
+    </svg>
+  );
+}
 
 export default function Home() {
   return (
@@ -93,10 +119,17 @@ export default function Home() {
             <Shortener />
           </div>
 
-          <div className="mt-16 flex flex-wrap items-center justify-center gap-x-9 gap-y-3">
-            {STACK.map((tech) => (
-              <span key={tech} className="mono text-[12px] tracking-wide text-faint">
-                {tech}
+          {/* What the visitor gets — not what it's built with. A logo soup of
+              frameworks tells someone deciding whether to paste a link exactly
+              nothing; these four lines tell them everything. */}
+          <div className="mt-16 flex flex-wrap items-center justify-center gap-x-8 gap-y-3">
+            {PROMISES.map((promise) => (
+              <span
+                key={promise}
+                className="flex items-center gap-2 text-[13px] text-muted"
+              >
+                <Tick />
+                {promise}
               </span>
             ))}
           </div>
@@ -127,20 +160,111 @@ export default function Home() {
             </h2>
           </Reveal>
 
-          <div className="mt-14 grid gap-px overflow-hidden rounded-2xl bg-border shadow-[var(--ring)] md:grid-cols-3">
-            {STEPS.map((step, i) => (
-              <Reveal key={step.n} delay={i * 80}>
-                <div className="h-full bg-bg p-8 transition-colors hover:bg-surface">
-                  <span className="mono text-[12px] text-faint">{step.n}</span>
-                  <h3 className="mt-4 text-[17px] font-semibold tracking-tight">
-                    {step.title}
-                  </h3>
-                  <p className="mt-2.5 text-[14px] leading-relaxed text-muted">
-                    {step.body}
+          {/* A hairline runs behind the three steps, connecting them — so they read
+              as one sequence rather than three unrelated boxes. It's decorative
+              only, and hidden once they stack on a narrow screen. */}
+          <div className="relative mt-16">
+            <span
+              className="absolute top-[22px] right-[16%] left-[16%] hidden h-px bg-gradient-to-r from-transparent via-border-strong to-transparent md:block"
+              aria-hidden="true"
+            />
+
+            <div className="relative grid gap-12 md:grid-cols-3 md:gap-8">
+              {STEPS.map((step, i) => (
+                <Reveal key={step.n} delay={i * 90}>
+                  <div className="group">
+                    <span className="mono grid h-11 w-11 place-items-center rounded-xl bg-surface text-[13px] text-matrix shadow-[var(--ring)] transition-colors group-hover:bg-surface-2">
+                      {step.n}
+                    </span>
+                    <h3 className="mt-6 text-[17px] font-semibold tracking-tight">
+                      {step.title}
+                    </h3>
+                    <p className="mt-3 max-w-[38ch] text-[14px] leading-relaxed text-muted">
+                      {step.body}
+                    </p>
+                  </div>
+                </Reveal>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ------------------------------------------------------- assistant */}
+      <section id="assistant" className="scroll-mt-20 border-t border-border py-24">
+        <div className="mx-auto max-w-[1200px] px-5 sm:px-9">
+          <div className="grid items-center gap-14 lg:grid-cols-[1fr_1.15fr]">
+            <Reveal>
+              <p className="mono mb-4 text-[11px] tracking-[0.16em] text-matrix uppercase opacity-70">
+                Built-in assistant
+              </p>
+              <h2 className="display max-w-[18ch] text-[clamp(1.9rem,3.6vw,2.75rem)] text-fg">
+                Talk to your links.
+              </h2>
+              <p className="mt-5 max-w-[52ch] text-[15px] leading-relaxed text-muted">
+                Trunc ships a chat that is a genuine MCP client — the same protocol,
+                the same server, the same tools Claude Desktop would use. Ask it to
+                shorten something, or how your links did this week.
+              </p>
+              <p className="mt-4 max-w-[52ch] text-[15px] leading-relaxed text-muted">
+                And it doesn&apos;t hide the tool calls. You see exactly what it
+                asked for and exactly what came back — because an assistant you
+                can&apos;t check is an assistant you can&apos;t trust.
+              </p>
+
+              <div className="mt-8 flex flex-wrap gap-3">
+                <Link href="/chat" className="btn btn-primary">
+                  Try the assistant <span className="arrow">→</span>
+                </Link>
+                <Link href="/mcp" className="btn btn-secondary">
+                  Use it from Claude
+                </Link>
+              </div>
+            </Reveal>
+
+            {/*
+              An illustration of the interaction, not a recording of one. The
+              numbers are placeholders — the real thing runs against your own
+              account, which is exactly why it can't be shown here.
+            */}
+            <Reveal delay={90}>
+              <div className="card-raised space-y-3 p-6">
+                <p className="mono mb-4 text-[10px] tracking-[0.14em] text-faint uppercase">
+                  Example
+                </p>
+
+                <div className="flex justify-end">
+                  <p className="max-w-[85%] rounded-xl rounded-br-sm bg-surface-2 px-4 py-2.5 text-[13.5px]">
+                    Shorten github.com/subhm2004 and tell me which of my links is
+                    doing best
                   </p>
                 </div>
-              </Reveal>
-            ))}
+
+                <div className="terminal">
+                  <div className="flex items-center gap-3 px-5 py-3">
+                    <span className="mono text-[13px] text-matrix">✓</span>
+                    <span className="mono flex-1 text-[13px]">shorten_url</span>
+                    <span className="mono text-[11px] text-faint">142ms</span>
+                  </div>
+                </div>
+
+                <div className="terminal">
+                  <div className="flex items-center gap-3 px-5 py-3">
+                    <span className="mono text-[13px] text-matrix">✓</span>
+                    <span className="mono flex-1 text-[13px]">get_my_links</span>
+                    <span className="mono text-[11px] text-faint">89ms</span>
+                  </div>
+                </div>
+
+                <p className="pt-2 text-[13.5px] leading-relaxed text-fg-2">
+                  Done — it&apos;s at{" "}
+                  <span className="mono text-matrix">trunc.sh/x7Kp2mQ1</span>. Your
+                  best performer is{" "}
+                  <span className="mono text-matrix">/neon-db</span> with 51 clicks,
+                  about half of everything you&apos;ve had this month.
+                </p>
+              </div>
+            </Reveal>
           </div>
         </div>
       </section>
@@ -149,117 +273,106 @@ export default function Home() {
       <section id="patterns" className="scroll-mt-20 border-t border-border py-24">
         <div className="mx-auto max-w-[1200px] px-5 sm:px-9">
           <Reveal>
-            <p className="mono mb-4 text-[11px] tracking-[0.16em] text-matrix uppercase opacity-70">
-              The twelve
-            </p>
-            <h2 className="display max-w-[22ch] text-[clamp(1.9rem,3.6vw,2.75rem)] text-fg">
-              Every pattern here earns its place.
-            </h2>
-            <p className="mt-5 max-w-[62ch] text-[15px] leading-relaxed text-muted">
-              None were added to pad a list. Each one is here because something was
-              hard to change, unsafe, or slow without it — the last line of each card
-              says which.
-            </p>
+            <div className="grid gap-10 lg:grid-cols-[1fr_1.1fr] lg:items-end">
+              <div>
+                <p className="mono mb-4 text-[11px] tracking-[0.16em] text-matrix uppercase opacity-70">
+                  Architecture
+                </p>
+                <h2 className="display max-w-[16ch] text-[clamp(1.9rem,3.6vw,2.75rem)] text-fg">
+                  Twelve patterns. None of them decorative.
+                </h2>
+              </div>
+
+              <p className="max-w-[54ch] text-[15px] leading-relaxed text-muted">
+                Most projects list design patterns like trophies. These are here
+                because specific things were unsafe, slow, or impossible to change
+                without them — and the code says which. Four of them are below;
+                the rest are in the source, with the reasoning next to each one.
+              </p>
+            </div>
           </Reveal>
 
-          <div className="mt-14 grid gap-px overflow-hidden rounded-2xl bg-border shadow-[var(--ring)] sm:grid-cols-2 lg:grid-cols-3">
-            {PATTERNS.map((p, i) => (
-              <Reveal key={p.n} delay={(i % 3) * 60}>
-                <article className="group h-full bg-bg p-7 transition-colors hover:bg-surface">
-                  <div className="flex items-baseline gap-2.5">
-                    <span className="mono text-[11px] text-faint">{p.n}</span>
-                    <h3 className="text-[15.5px] font-semibold tracking-tight">
-                      {p.name}
-                    </h3>
+          <div className="mt-16 grid gap-4 md:grid-cols-2">
+            {PILLARS.map((pillar, i) => (
+              <Reveal key={pillar.n} delay={(i % 2) * 80}>
+                <article className="card group flex h-full flex-col p-8 transition-colors hover:bg-surface-2">
+                  <span className="mono text-[11px] text-faint">{pillar.n}</span>
+
+                  <h3 className="mt-4 max-w-[22ch] text-[19px] leading-snug font-semibold tracking-[-0.02em]">
+                    {pillar.claim}
+                  </h3>
+
+                  <p className="mt-4 flex-1 text-[14px] leading-relaxed text-muted">
+                    {pillar.body}
+                  </p>
+
+                  {/* The pattern names, as a footnote. Whoever wants them will look;
+                      whoever doesn't has already got the point. */}
+                  <div className="mt-7 flex flex-wrap gap-2 border-t border-border-soft pt-5">
+                    {pillar.patterns.map((name) => (
+                      <span
+                        key={name}
+                        className="mono rounded-md bg-surface-2 px-2.5 py-1 text-[11px] text-matrix opacity-70 transition-opacity group-hover:opacity-100"
+                      >
+                        {name}
+                      </span>
+                    ))}
                   </div>
-                  <p className="mono mt-2.5 text-[11.5px] text-matrix opacity-60">
-                    {p.where}
-                  </p>
-                  <p className="mt-3 text-[13.5px] leading-relaxed text-muted">
-                    {p.why}
-                  </p>
                 </article>
               </Reveal>
             ))}
           </div>
-        </div>
-      </section>
 
-      {/* -------------------------------------------------------- receipts */}
-      <section className="border-t border-border py-24">
-        <div className="mx-auto max-w-[1200px] px-5 sm:px-9">
-          <Reveal>
-            <p className="mono mb-4 text-[11px] tracking-[0.16em] text-matrix uppercase opacity-70">
-              Receipts
-            </p>
-            <h2 className="display max-w-[22ch] text-[clamp(1.9rem,3.6vw,2.75rem)] text-fg">
-              Four bugs the rewrite actually fixed.
-            </h2>
-            <p className="mt-5 max-w-[62ch] text-[15px] leading-relaxed text-muted">
-              Patterns are the means; these are the ends. Each one is verified
-              against a live Postgres in CI, not asserted in a README.
-            </p>
+          <Reveal delay={120}>
+            <div className="mt-10 flex justify-center">
+              <a
+                href="https://github.com/subhm2004/URL_Shortneer#design-patterns"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn btn-secondary"
+              >
+                All twelve, with the code <span className="arrow">→</span>
+              </a>
+            </div>
           </Reveal>
-
-          <div className="mt-14 grid gap-4 md:grid-cols-2">
-            {RECEIPTS.map((r, i) => (
-              <Reveal key={r.claim} delay={(i % 2) * 70}>
-                <div className="card flex h-full gap-4 p-6">
-                  <span
-                    className="mt-0.5 grid h-6 w-6 flex-none place-items-center rounded-full text-[11px] text-success"
-                    style={{
-                      background:
-                        "color-mix(in oklab, var(--success) 14%, transparent)",
-                    }}
-                    aria-hidden="true"
-                  >
-                    ✓
-                  </span>
-                  <div>
-                    <h3 className="mono text-[13.5px] font-medium text-fg">
-                      {r.claim}
-                    </h3>
-                    <p className="mt-2 text-[13.5px] leading-relaxed text-muted">
-                      {r.detail}
-                    </p>
-                  </div>
-                </div>
-              </Reveal>
-            ))}
-          </div>
         </div>
       </section>
 
-      {/* ------------------------------------------------------------- mcp */}
-      <section className="border-t border-border py-24">
+      {/* ------------------------------------------------------- final CTA */}
+      <section className="border-t border-border py-28">
         <div className="mx-auto max-w-[1200px] px-5 sm:px-9">
           <Reveal>
-            <div className="card-raised relative overflow-hidden p-10 sm:p-14">
-              <div className="spotlight opacity-60" aria-hidden="true" />
+            <div className="card-raised relative overflow-hidden px-8 py-16 text-center sm:px-14 sm:py-20">
+              <div className="grid-bg opacity-60" aria-hidden="true" />
+              <div className="spotlight" aria-hidden="true" />
 
-              <div className="relative flex flex-col items-start gap-8 lg:flex-row lg:items-center lg:justify-between">
-                <div className="max-w-[52ch]">
-                  <p className="mono mb-4 text-[11px] tracking-[0.16em] text-matrix uppercase opacity-70">
-                    Also for agents
-                  </p>
-                  <h2 className="display text-[clamp(1.7rem,3vw,2.4rem)] text-fg">
-                    Your AI assistant can use it too.
-                  </h2>
-                  <p className="mt-5 text-[15px] leading-relaxed text-muted">
-                    An MCP server ships with the app. Point Claude Desktop at it and
-                    shorten links, list them, and pull click analytics from inside a
-                    conversation.
-                  </p>
+              <div className="relative flex flex-col items-center">
+                <h2 className="display display-gradient max-w-[16ch] text-[clamp(2rem,4.4vw,3.4rem)]">
+                  Paste a link. Watch it resolve.
+                </h2>
+
+                <p className="mt-6 max-w-[52ch] text-[16px] leading-relaxed text-muted">
+                  Free, no account needed to start. Sign up when you want to see
+                  where the clicks are coming from.
+                </p>
+
+                <div className="mt-9 flex flex-wrap justify-center gap-3">
+                  <Link href="/register" className="btn btn-primary">
+                    Get started <span className="arrow">→</span>
+                  </Link>
+                  <a
+                    href="https://github.com/subhm2004/URL_Shortneer"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="btn btn-secondary"
+                  >
+                    Read the source
+                  </a>
                 </div>
 
-                <div className="flex flex-none gap-3">
-                  <Link href="/mcp" className="btn btn-primary">
-                    Read the guide <span className="arrow">→</span>
-                  </Link>
-                  <Link href="/dashboard" className="btn btn-secondary">
-                    Dashboard
-                  </Link>
-                </div>
+                <p className="mono mt-10 text-[11.5px] text-faint">
+                  open source · MIT · self-hostable
+                </p>
               </div>
             </div>
           </Reveal>
