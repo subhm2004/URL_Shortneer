@@ -1,6 +1,11 @@
 import { UNIQUE_VIOLATION } from "../repositories/BaseRepository.js";
 import { EVENTS } from "../core/EventBus.js";
-import { ConflictError, InternalError, NotFoundError } from "../core/errors.js";
+import {
+  ConflictError,
+  InternalError,
+  NotFoundError,
+  UnauthorizedError,
+} from "../core/errors.js";
 import logger from "../core/logger.js";
 
 export default class UrlService {
@@ -24,6 +29,22 @@ export default class UrlService {
    * @param {string} [customAlias]
    */
   async shorten({ longUrl, userId = null, customAlias }) {
+    /**
+     * A custom alias needs an account, and a random code does not.
+     *
+     * The two are not the same kind of thing. A generated code is drawn from a
+     * space nobody else wants; an alias is a claim on a *scarce, global*
+     * namespace — there is exactly one /google, one /paypal, one /launch. Handing
+     * those out to anonymous callers is handing out a squatting tool, and there
+     * would be no one to take them back from.
+     *
+     * CustomAliasStrategy's own comment already said "lets a signed-in user pick
+     * their own slug". It was the only thing enforcing it.
+     */
+    if (customAlias && !userId) {
+      throw new UnauthorizedError("Sign in to claim a custom alias.");
+    }
+
     const normalised = this.#validator.validate(longUrl);
 
     // Idempotent: pasting the same URL twice gives you back the same link rather
