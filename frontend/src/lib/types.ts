@@ -21,6 +21,9 @@ export interface User {
   id: string;
   name: string;
   email: string;
+  /** Google's profile picture, when they signed in that way. */
+  avatarUrl: string | null;
+  hasGoogle: boolean;
   createdAt: string;
 }
 

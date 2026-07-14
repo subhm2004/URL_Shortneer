@@ -131,6 +131,45 @@ export async function login(input: {
   return { token: res.token!, user: res.data!.user };
 }
 
+/** The signed-in user's own record. The JWT carries only an id. */
+export async function me(): Promise<User> {
+  const res = await request<{ user: User }>("/api/auth/me", { auth: "required" });
+  return res.data!.user;
+}
+
+export interface Providers {
+  password: boolean;
+  google: boolean;
+}
+
+/**
+ * Which sign-in methods the backend actually has configured.
+ *
+ * Asked rather than assumed: with no Google credentials set, the backend doesn't
+ * mount those routes, and a hardcoded button would render happily and then 404
+ * when clicked.
+ *
+ * This deliberately does NOT swallow a failure. It used to — returning
+ * `{ google: false }` when the backend was unreachable — and that made a dead
+ * backend look exactly like a backend with no Google credentials: the button
+ * silently vanished either way. Two unrelated problems, one identical symptom,
+ * and no way to tell them apart. The caller has to know the difference.
+ */
+export async function providers(): Promise<Providers> {
+  const res = await request<Providers>("/api/auth/providers", { auth: "none" });
+  return res.data ?? { password: true, google: false };
+}
+
+/**
+ * Starts the OAuth flow as a full-page navigation, not a fetch.
+ *
+ * It has to be: Google's consent screen is a page the user must actually see and
+ * interact with. An XHR to it would be blocked, and there'd be nothing to show.
+ */
+export function startGoogleSignIn(): void {
+  window.location.href = `${BASE}/api/auth/google`;
+}
+
 /* ---------------------------------------------------------------------------
    links
    --------------------------------------------------------------------------- */
